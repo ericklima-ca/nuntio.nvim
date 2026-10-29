@@ -436,6 +436,7 @@ function M.start(ctx)
     feeder = feeder,
     data_label = data_label,
     title = string.format("%s %s", ctx.block.method or "GET", ctx.block.url),
+    icon_line = ctx.block.icon_line,
     collector = Stats.new(),
     started_at = now,
     deadline = opts.duration and (now + opts.duration * 1e6) or nil,
@@ -447,6 +448,8 @@ function M.start(ctx)
     on_update = ctx.on_update,
     on_finish = ctx.on_finish,
   }
+  -- First render before registering, so an error here cannot leave a phantom active run
+  refresh(state)
   M.active = state
 
   state.timer = vim.uv.new_timer()
@@ -456,7 +459,6 @@ function M.start(ctx)
     end
   end))
 
-  refresh(state)
   for vu = 1, opts.concurrency do
     vim.schedule(function() dispatch(state, vu) end)
   end
