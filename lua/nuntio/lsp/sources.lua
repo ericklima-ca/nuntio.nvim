@@ -317,6 +317,30 @@ M.directives = {
     doc = "# @data <file.csv|file.json> [mode=circular|sequential|random|unique]\n\nEach load test iteration takes one row; columns are available as `{{data.<column>}}`.\n\n- `circular` (default): in order, wrapping around\n- `sequential`: in order, the test stops when rows run out\n- `random`: random rows, with repeats\n- `unique`: random order, each row once",
   },
   {
+    name = "@scenario",
+    insert_text = "@scenario ",
+    detail = "Define a load test scenario",
+    doc = "# @scenario <name> [weight=N]\n\nA block without a request line that defines a multi-step flow. Each load test iteration runs the steps in order for one virtual user; chained values like `{{login.response.body.$.token}}` resolve from that virtual user's own responses, and each iteration gets a fresh cookie jar.\n\n```http\n### Checkout flow\n# @scenario checkout weight=30\n# @steps login -> add_to_cart -> checkout\n# @think 200..800ms\n# @load iterations=50 concurrency=5\n```\n\nRun it with `:Nuntio load` on the block. `weight` is used by `# @load-mix`.",
+  },
+  {
+    name = "@steps",
+    insert_text = "@steps ",
+    detail = "Scenario steps (named requests)",
+    doc = "# @steps <name> -> <name> -> ...\n\nRequests (by `# @name`) a scenario sends in order. A failed step ends the iteration.",
+  },
+  {
+    name = "@think",
+    insert_text = "@think ",
+    detail = "Pause between scenario steps",
+    doc = "# @think <time> | <min>..<max>\n\nRandom pause between steps to imitate real users, e.g. `500ms`, `1s` or `200..800ms`.",
+  },
+  {
+    name = "@load-mix",
+    insert_text = "@load-mix ",
+    detail = "Weighted mix of scenarios",
+    doc = "# @load-mix <scenario> <scenario> ...\n\nA block without a request line that runs several scenarios together, each iteration picking one by its `weight`. Put `# @load` and `# @data` on this block.",
+  },
+  {
     name = "@jq",
     insert_text = "@jq ",
     detail = "Transform response body with jq",

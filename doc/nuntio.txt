@@ -402,6 +402,31 @@ grouped errors and failed assertions. The request line shows progress,
 then a summary. Keys in the report: `<C-c>` cancel, `R` rerun, `q` close.
 Load runs never touch response history, chained variables or cookies.
 
+SCENARIOS:                                            *nuntio-load-scenarios*
+A scenario is a block without a request line that chains named requests.
+Run `:Nuntio load` with the cursor on it:
+>http
+    ### Scenario: buyer
+    # @scenario buyer weight=30
+    # @steps login -> add_to_cart -> checkout
+    # @think 200..800ms
+    # @load iterations=100 concurrency=10
+<
+  @scenario <name> [weight=N]   Declares the scenario (weight for mixes)
+  @steps a -> b -> c            Named requests (`# @name`) sent in order
+  @think 500ms | 200..800ms     Random pause between steps
+  @load-mix <name> <name> ...   On its own block: run scenarios together,
+                                each iteration picking one by weight
+
+Each iteration runs the whole flow for one virtual user:
+- Chained values (`{{login.response.body.$.token}}`) resolve from that
+  iteration's own responses, never from response history.
+- Each iteration starts with a fresh cookie jar for its virtual user.
+- One `# @data` row per iteration, shared by its steps.
+- A failed step ends the iteration.
+`iterations=` is an alias of `requests=`. The request limit counts
+iterations × steps. The report adds per-scenario and per-step tables.
+
 LIMITS:                                                  *nuntio-load-limits*
 Each request spawns one curl process, which caps throughput at a few hundred
 requests per second. Runs above these limits are refused:

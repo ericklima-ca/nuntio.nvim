@@ -23,6 +23,7 @@ local M = {}
 ---@field redirect? NuntioRedirect
 ---@field is_shared boolean
 ---@field is_shared_each boolean
+---@field is_plan? boolean Load plan block without a request line
 
 local HTTP_METHODS = {
   GET = true, POST = true, PUT = true, DELETE = true,
@@ -123,9 +124,11 @@ end
 ---@param lines string[]
 ---@return NuntioBlock[] blocks
 ---@return table<string, string> doc_variables
+---@return NuntioBlock[] plans Request-less load plan blocks (`# @scenario` / `# @load-mix`)
 function M.parse_document(lines)
   local blocks = {}
   local doc_variables = {}
+  local plans = {}
 
   local current = new_block(1)
   local section = "pre_request" -- "pre_request" | "headers" | "body"
@@ -135,6 +138,10 @@ function M.parse_document(lines)
       current.end_line = end_line
       current.body = Utils.trim(current.body)
       table.insert(blocks, current)
+    elseif current.metadata["scenario"] or current.metadata["load-mix"] then
+      current.end_line = end_line
+      current.is_plan = true
+      table.insert(plans, current)
     end
   end
 
@@ -252,7 +259,7 @@ function M.parse_document(lines)
 
   finish_block(#lines)
 
-  return blocks, doc_variables
+  return blocks, doc_variables, plans
 end
 
 --- Get request block at cursor line

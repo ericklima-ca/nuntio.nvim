@@ -25,12 +25,13 @@ end
 ---@param doc_vars? table<string, any>
 ---@param env_vars? table<string, any>
 ---@param custom_dynamic? table<string, fun():any>
+---@param chain_ctx? NuntioChainContext
 ---@return string|nil
-function M.resolve_one(var_name, doc_vars, env_vars, custom_dynamic)
+function M.resolve_one(var_name, doc_vars, env_vars, custom_dynamic, chain_ctx)
   var_name = vim.trim(var_name)
 
   -- 1. Request variable chaining: e.g. "auth.response.body.$.token"
-  local req_val = RequestVars.resolve(var_name)
+  local req_val = RequestVars.resolve(var_name, chain_ctx)
   if req_val ~= nil then
     return req_val
   end
@@ -75,8 +76,9 @@ end
 ---@param env_vars? table<string, any>
 ---@param custom_dynamic? table<string, fun():any>
 ---@param max_depth? number
+---@param chain_ctx? NuntioChainContext
 ---@return string
-function M.interpolate(text, doc_vars, env_vars, custom_dynamic, max_depth)
+function M.interpolate(text, doc_vars, env_vars, custom_dynamic, max_depth, chain_ctx)
   if not text or text == "" then return "" end
   max_depth = max_depth or 5
   local result = text
@@ -85,7 +87,7 @@ function M.interpolate(text, doc_vars, env_vars, custom_dynamic, max_depth)
   while depth < max_depth do
     local had_replacement = false
     result = result:gsub("{{%s*(.-)%s*}}", function(var_name)
-      local val = M.resolve_one(var_name, doc_vars, env_vars, custom_dynamic)
+      local val = M.resolve_one(var_name, doc_vars, env_vars, custom_dynamic, chain_ctx)
       if val ~= nil then
         had_replacement = true
         return val

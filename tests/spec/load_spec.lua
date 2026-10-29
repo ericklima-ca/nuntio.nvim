@@ -317,3 +317,199 @@ describe("Load: report and diagnostics", function()
     vim.api.nvim_buf_delete(plain, { force = true })
   end)
 end)
+
+describe("Load: scenarios", function()
+  local Scenario = require("nuntio.load.scenario")
+  local RequestVars = require("nuntio.parser.request_vars")
+  local Store = require("nuntio.store")
+
+  local doc = {
+    "### Login",
+    "# @name login",
+    "POST https://api.example.com/login",
+    "",
+    "### Browse",
+    "# @name browse",
+    "GET https://api.example.com/products",
+    "",
+    "### Checkout",
+    "# @name checkout",
+    "POST https://api.example.com/checkout",
+    "",
+    "### Scenario: buyer",
+    "# @scenario buyer weight=30",
+    "# @steps login -> browse -> checkout",
+    "# @think 200..800ms",
+    "# @load iterations=50 concurrency=5",
+    "",
+    "### Scenario: window shopper",
+    "# @scenario shopper weight=70",
+    "# @steps login, browse",
+    "",
+    "### Mix",
+    "# @load-mix buyer shopper",
+    "# @load duration=30s concurrency=10",
+  }
+
+  it("parses think times, headers and step lists", function()
+    local t = Scenario.parse_think("200..800ms")
+    assert_eq(t.min, 200)
+    assert_eq(t.max, 800)
+    t = Scenario.parse_think("1s..2s")
+    assert_eq(t.min, 1000)
+    assert_eq(t.max, 2000)
+    t = Scenario.parse_think("500ms")
+    assert_eq(t.min, 500)
+    assert_eq(t.max, 500)
+    assert_nil(Scenario.parse_think("soon"))
+    local _, err = Scenario.parse_think("900..100ms")
+    assert_true(err:find("reversed", 1, true) ~= nil)
+
+    local h = Scenario.parse_header("checkout weight=30")
+    assert_eq(h.name, "checkout")
+    assert_eq(h.weight, 30)
+    assert_eq(Scenario.parse_header("checkout").weight, 1)
+    _, err = Scenario.parse_header("checkout weight=0")
+    assert_true(err:find("weight", 1, true) ~= nil)
+
+    assert_eq(table.concat(Scenario.split_names("login -> browse->checkout"), ","), "login,browse,checkout")
+    assert_eq(table.concat(Scenario.split_names("a, b c"), ","), "a,b,c")
+  end)
+
+  it("keeps request-less scenario and mix blocks out of the request list", function()
+    local blocks, _, plans = Document.parse_document(doc)
+    assert_eq(#blocks, 3, "only real requests are runnable blocks")
+    assert_eq(#plans, 3)
+    assert_true(plans[1].is_plan)
+    assert_eq(plans[1].metadata["scenario"][1], "buyer weight=30")
+    assert_eq(plans[3].metadata["load-mix"][1], "buyer shopper")
+    assert_eq(plans[1].icon_line, 13, "progress shows on the ### line")
+  end)
+
+  it("builds scenario and mix plans", function()
+    local blocks, _, plans = Document.parse_document(doc)
+    local buyer = Scenario.build(plans[1], blocks, plans)
+    assert_eq(buyer.kind, "scenario")
+    assert_eq(#buyer.scenarios[1].steps, 3)
+    assert_eq(buyer.scenarios[1].steps[3].url, "https://api.example.com/checkout")
+    assert_eq(buyer.scenarios[1].think.max, 800)
+    assert_true(buyer.owns.login and buyer.owns.checkout)
+    assert_eq(buyer.title, "scenario buyer (login → browse → checkout)")
+
+    local mix = Scenario.build(plans[3], blocks, plans)
+    assert_eq(mix.kind, "mix")
+    assert_eq(#mix.scenarios, 2)
+    assert_eq(mix.total_weight, 100)
+    assert_eq(mix.max_steps, 3)
+    assert_eq(mix.title, "mix buyer 30% · shopper 70%")
+
+    -- Weighted pick: roll 1..30 -> buyer, 31..100 -> shopper
+    assert_eq(Scenario.pick(mix, function() return 30 end).name, "buyer")
+    assert_eq(Scenario.pick(mix, function() return 31 end).name, "shopper")
+  end)
+
+  it("reports unknown steps and scenarios", function()
+    local blocks, _, plans = Document.parse_document({
+      "# @name login",
+      "GET https://api.example.com/login",
+      "",
+      "### Broken",
+      "# @scenario broken",
+      "# @steps login -> missing",
+      "",
+      "### Empty",
+      "# @scenario empty",
+      "",
+      "### Mix",
+      "# @load-mix broken ghost",
+    })
+    local _, err = Scenario.build(plans[1], blocks, plans)
+    assert_true(err:find("unknown request 'missing'", 1, true) ~= nil, err)
+    _, err = Scenario.build(plans[2], blocks, plans)
+    assert_true(err:find("has no steps", 1, true) ~= nil, err)
+    _, err = Scenario.build(plans[3], blocks, plans)
+    assert_true(err:find("unknown request 'missing'", 1, true) ~= nil or err:find("unknown scenario 'ghost'", 1, true) ~= nil, err)
+  end)
+
+  it("resolves chained values from the virtual user's context, never from history", function()
+    Store.add_response({ name = "login", status = 200, json = { token = "GLOBAL" }, body = '{"token":"GLOBAL"}', headers = {} },
+      { url = "u", method = "POST", headers = {}, body = "" })
+    local ctx = {
+      responses = { login = { status = 200, json = { token = "VU-7" }, body = '{"token":"VU-7"}', headers = { ["X-Session"] = "s7" } } },
+      requests = { login = { url = "https://api.example.com/login", method = "POST", headers = {}, body = "" } },
+      owns = { login = true, browse = true },
+    }
+    assert_eq(RequestVars.resolve("login.response.body.$.token", ctx), "VU-7")
+    assert_eq(RequestVars.resolve("login.response.headers.X-Session", ctx), "s7")
+    assert_eq(RequestVars.resolve("login.request.url", ctx), "https://api.example.com/login")
+    assert_nil(RequestVars.resolve("browse.response.body.$.id", ctx), "owned step not run yet: no fallback")
+    assert_eq(RequestVars.resolve("login.response.body.$.token"), "GLOBAL", "normal runs still use history")
+
+    local block = Document.parse_document({ "GET https://api.example.com/me?t={{login.response.body.$.token}}" })[1]
+    local resolved = Request.resolve(block, {}, vim.uv.cwd(), nil, nil, { env = { vars = {}, default_headers = {} }, chain = ctx })
+    assert_eq(resolved.url, "https://api.example.com/me?t=VU-7")
+
+    -- Remove the planted entry so later specs see a clean history
+    table.remove(Store.history)
+    Store.by_name.login = nil
+    Store.sent_requests.login = nil
+  end)
+
+  it("scales the request limit by scenario length and accepts iterations=", function()
+    assert_eq(Load.parse_options({ "iterations=40" }).requests, 40)
+    assert_eq(Load.parse_options({ "i=40" }).requests, 40)
+    assert_nil(Load.validate({ requests = 1000, concurrency = 10 }, 5))
+    local err = Load.validate({ requests = 2000, concurrency = 10 }, 3)
+    assert_true(err:find("requests 6000 (2000 iterations × 3 steps) > 5000", 1, true) ~= nil, err)
+  end)
+
+  it("renders per-scenario and per-step tables", function()
+    local c = Stats.new()
+    Stats.record(c, { ok = true, status = 200, wall_ms = 30, total_ms = 25 })
+    local step = Stats.summarize(c, 1000)
+    local report = Stats.summarize(c, 1000)
+    report.breakdown = {
+      scenarios = { { name = "buyer", weight = 30, iterations = 4, ok = 3, duration = Stats.distribution({ 900, 1100, 1200, 2400 }) } },
+      steps = { { name = "login", report = step } },
+    }
+    local text = table.concat(Report.format(report, { title = "scenario buyer", state = "done", plan = "" }), "\n")
+    assert_true(text:find("Scenario           weight   iters", 1, true) ~= nil, text)
+    assert_true(text:find("buyer", 1, true) ~= nil)
+    assert_true(text:find("75.0%", 1, true) ~= nil, "scenario ok%")
+    assert_true(text:find("1.10s", 1, true) ~= nil, "iteration p50")
+    assert_true(text:find("login", 1, true) ~= nil and text:find("100.0%", 1, true) ~= nil, "step row")
+  end)
+
+  it("flags invalid scenario directives", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      "# @name login",
+      "GET https://api.example.com/login",
+      "",
+      "### Good",
+      "# @scenario good weight=2",
+      "# @steps login",
+      "# @think 100..300ms",
+      "",
+      "### Bad",
+      "# @scenario bad weight=x",
+      "# @steps login -> nope",
+      "# @think later",
+      "",
+      "### Mix",
+      "# @load-mix good ghost",
+    })
+    Diagnostics.check(buf)
+    local messages = {}
+    for _, d in ipairs(vim.diagnostic.get(buf)) do
+      table.insert(messages, d.lnum .. ":" .. d.message)
+    end
+    local all = table.concat(messages, "\n")
+    assert_eq(#messages, 4, all)
+    assert_true(all:find("9:Invalid @scenario", 1, true) ~= nil, all)
+    assert_true(all:find("10:Invalid @steps: unknown request 'nope'", 1, true) ~= nil, all)
+    assert_true(all:find("11:Invalid @think", 1, true) ~= nil, all)
+    assert_true(all:find("14:Invalid @load-mix: unknown scenario 'ghost'", 1, true) ~= nil, all)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)

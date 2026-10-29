@@ -3,6 +3,7 @@ local Document = require("nuntio.parser.document")
 local Env = require("nuntio.env")
 local Load = require("nuntio.load")
 local LoadData = require("nuntio.load.data")
+local Scenario = require("nuntio.load.scenario")
 
 local M = {}
 
@@ -52,7 +53,8 @@ function M.check(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local blocks, doc_vars = Document.parse_document(lines)
+  local blocks, doc_vars, plans = Document.parse_document(lines)
+  local diagnostics = {}
 
   local buf_path = vim.api.nvim_buf_get_name(bufnr)
   local buf_dir = (buf_path and buf_path ~= "") and vim.fs.dirname(buf_path) or vim.uv.cwd()
@@ -61,17 +63,81 @@ function M.check(bufnr)
   local meta_vars = get_metadata_declared_vars(blocks)
   local named_requests = get_named_requests(blocks)
   local has_data = false
-  for _, b in ipairs(blocks) do
-    if b.metadata and b.metadata["data"] then
-      has_data = true
-      break
+  local scenario_names = {}
+  for _, list in ipairs({ blocks, plans }) do
+    for _, b in ipairs(list) do
+      if b.metadata and b.metadata["data"] then
+        has_data = true
+      end
+      local header = b.metadata and b.metadata["scenario"] and Scenario.parse_header(b.metadata["scenario"][1])
+      if header then
+        scenario_names[header.name] = true
+      end
     end
   end
 
-  local diagnostics = {}
+  --- Flag the rest of a directive line from `col` (1-based) onwards
+  local function flag(l_idx, line, col, message)
+    table.insert(diagnostics, {
+      bufnr = bufnr,
+      lnum = l_idx,
+      end_lnum = l_idx,
+      col = col - 1,
+      end_col = #line,
+      severity = vim.diagnostic.severity.ERROR,
+      source = "nuntio",
+      message = message,
+    })
+  end
+
+  --- Match `# @<name> ...` exactly (not a longer directive with the same prefix)
+  local function directive(line, name)
+    local col, rest = line:match("^%s*#%s*@" .. name:gsub("%-", "%%-") .. "()(.*)$")
+    if col and (rest == "" or rest:match("^%s")) then
+      return col, rest
+    end
+    return nil
+  end
+
 
   for lnum, line in ipairs(lines) do
     local l_idx = lnum - 1 -- 0-based for LSP diagnostics
+
+    -- 0. Load scenarios: # @scenario, # @steps, # @think, # @load-mix
+    local col, rest = directive(line, "scenario")
+    if col then
+      local _, err = Scenario.parse_header(rest)
+      if err then flag(l_idx, line, col, "Invalid @scenario: " .. err) end
+    end
+    col, rest = directive(line, "steps")
+    if col then
+      local names = Scenario.split_names(rest)
+      if #names == 0 then
+        flag(l_idx, line, col, "Invalid @steps: list request names, e.g. # @steps login -> browse")
+      end
+      for _, name in ipairs(names) do
+        if not named_requests[name] then
+          flag(l_idx, line, col, "Invalid @steps: unknown request '" .. name .. "' (name it with # @name " .. name .. ")")
+        end
+      end
+    end
+    col, rest = directive(line, "think")
+    if col then
+      local _, err = Scenario.parse_think(rest)
+      if err then flag(l_idx, line, col, "Invalid @think: " .. err) end
+    end
+    col, rest = directive(line, "load-mix")
+    if col then
+      local names = Scenario.split_names(rest)
+      if #names == 0 then
+        flag(l_idx, line, col, "Invalid @load-mix: list scenario names, e.g. # @load-mix browse checkout")
+      end
+      for _, name in ipairs(names) do
+        if not scenario_names[name] then
+          flag(l_idx, line, col, "Invalid @load-mix: unknown scenario '" .. name .. "'")
+        end
+      end
+    end
 
     -- 0a. Validate `# @load` options and `# @data` files
     local load_col, load_expr = line:match("^%s*#%s*@load()(.*)$")

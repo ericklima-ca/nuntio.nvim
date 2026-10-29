@@ -42,7 +42,7 @@ end
 --- Summary statistics for a list of values
 ---@param values number[]
 ---@return table|nil { min, p50, p90, p95, p99, max, mean }
-local function distribution(values)
+function M.distribution(values)
   if #values == 0 then return nil end
   local sorted = vim.deepcopy(values)
   table.sort(sorted)
@@ -143,8 +143,8 @@ function M.summarize(c, elapsed_ms, client_bound_threshold)
 
   report.success_rate = report.total > 0 and (report.succeeded / report.total * 100) or 0
   report.rps = elapsed_ms > 0 and (report.total / (elapsed_ms / 1000)) or 0
-  report.latency = distribution(latencies)
-  report.ttfb = distribution(ttfbs)
+  report.latency = M.distribution(latencies)
+  report.ttfb = M.distribution(ttfbs)
   report.overhead_ratio = wall_sum > 0 and (overhead_sum / wall_sum) or 0
   report.client_bound = report.overhead_ratio >= (client_bound_threshold or 0.3)
 

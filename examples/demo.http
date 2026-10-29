@@ -199,3 +199,23 @@ Accept: text/html
 # @assert body $.args.store exists
 GET {{baseUrl}}/anything/products/{{data.sku}}?store={{data.store}}&iteration={{$iteration}}&vu={{$vu}}
 Accept: application/json
+
+### 21. Scenario Step: Login
+# @name demo_login
+POST {{baseUrl}}/anything/login
+Content-Type: application/json
+
+{ "user": "shopper-{{$vu}}-{{$iteration}}" }
+
+### 22. Scenario Step: Profile (chains from this virtual user's own login)
+# @name demo_profile
+# @assert body $.url contains shopper-
+GET {{baseUrl}}/anything/profile/{{demo_login.response.body.$.json.user}}
+
+### 23. Load Scenario: login -> profile (:Nuntio load on this block)
+# Each iteration runs the steps in order for one virtual user, with its own
+# chained values and a fresh cookie jar. Steps are the # @name requests above.
+# @scenario shopper weight=1
+# @steps demo_login -> demo_profile
+# @think 200..500ms
+# @load iterations=10 concurrency=2

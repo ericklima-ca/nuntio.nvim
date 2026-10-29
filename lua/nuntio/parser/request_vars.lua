@@ -4,14 +4,20 @@ local Utils = require("nuntio.utils")
 
 local M = {}
 
+---@class NuntioChainContext
+---@field responses table<string, table> Request name -> response (status, headers, body, json, cookies)
+---@field requests table<string, table> Request name -> sent request (url, method, headers, body)
+---@field owns table<string, boolean> Names resolved only from this context, never from Store
+
 --- Parse and resolve a request reference variable
 --- e.g., "LOGIN.response.body.$.token"
 ---       "LOGIN.response.headers.Authorization"
 ---       "LOGIN.response.cookies.session.value"
 ---       "LOGIN.request.url"
 ---@param expr string
+---@param chain_ctx? NuntioChainContext Isolated context (load test virtual users) checked before Store
 ---@return string|nil
-function M.resolve(expr)
+function M.resolve(expr, chain_ctx)
   -- Lua patterns do not support (response|request) alternation
   local req_name, target = expr:match("^([%w_%-]+)%.response%.(.*)$")
   local part = "response"
@@ -24,8 +30,15 @@ function M.resolve(expr)
     return nil
   end
 
-  local resp = Store.get_by_name(req_name)
-  local sent = Store.get_request_by_name(req_name)
+  local resp, sent
+  if chain_ctx and chain_ctx.owns[req_name] then
+    -- Scenario steps must only see what this virtual user received
+    resp = chain_ctx.responses[req_name]
+    sent = chain_ctx.requests[req_name]
+  else
+    resp = Store.get_by_name(req_name)
+    sent = Store.get_request_by_name(req_name)
+  end
 
   if part == "request" then
     if not sent then return nil end
