@@ -37,6 +37,10 @@ M.sent_requests = {}
 ---@type table<string, any>
 M.globals = {}
 
+--- Values entered via # @secret: kept in memory only, never written to disk
+---@type table<string, string>
+M.secrets = {}
+
 --- Map of variable name -> producer info { req_name?: string, path?: string, type?: string }
 ---@type table<string, table>
 M.var_producers = {}
@@ -121,6 +125,10 @@ end
 ---@param key string
 ---@return any
 function M.get_global(key)
+  local secret = M.secrets[key]
+  if secret ~= nil then
+    return secret
+  end
   return M.globals[key]
 end
 
@@ -129,6 +137,8 @@ end
 ---@param value any
 ---@param producer_info? table
 function M.set_global(key, value, producer_info)
+  -- A persisted value replaces any in-memory secret of the same name
+  M.secrets[key] = nil
   M.globals[key] = value
   if producer_info then
     M.var_producers[key] = producer_info
@@ -146,14 +156,29 @@ end
 --- Clear a specific global variable
 ---@param key string
 function M.clear_global(key)
+  M.secrets[key] = nil
   M.globals[key] = nil
   M.save_globals()
 end
 
 --- Clear all global variables
 function M.clear_all_globals()
+  M.secrets = {}
   M.globals = {}
   M.save_globals()
+end
+
+--- Store a secret for this session only (never persisted)
+---@param key string
+---@param value string
+function M.set_secret(key, value)
+  M.secrets[key] = value
+  -- Scrub a copy persisted by earlier versions, or by a # @prompt of the same name
+  if M.globals[key] ~= nil then
+    M.globals[key] = nil
+    M.var_producers[key] = nil
+    M.save_globals()
+  end
 end
 
 -- Initialize globals on module load

@@ -134,6 +134,14 @@ VARIABLE PRECEDENCE (LOWEST TO HIGHEST):
   7. In-Document Variables (@var = value)
   8. Interactive Prompts (# @prompt, # @secret)
 
+PERSISTENCE:                                             *nuntio-persistence*
+- `# @secret` values live in memory for the current Neovim session only and
+  are never written to disk. Re-entering a secret also removes any copy an
+  older nuntio version may have saved.
+- `# @prompt` values and values exported with `# @env-json-key` /
+  `# @env-header-key` are saved to `stdpath("data")/nuntio_globals.json`
+  so they survive restarts. Use `# @secret` for anything sensitive.
+
 ==============================================================================
 5. .HTTP SYNTAX & FEATURES                                    *nuntio-syntax*
 

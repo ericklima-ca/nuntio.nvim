@@ -67,6 +67,7 @@ local test_files = {
   "tests/spec/jsonpath_spec.lua",
   "tests/spec/assertions_spec.lua",
   "tests/spec/load_spec.lua",
+  "tests/spec/secrets_spec.lua",
   "tests/spec/vars_spec.lua",
   "tests/spec/env_spec.lua",
   "tests/spec/curl_spec.lua",

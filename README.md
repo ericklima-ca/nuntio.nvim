@@ -237,6 +237,8 @@ When the same variable exists across sources, `nuntio.nvim` resolves conflicts i
 7. **Document In-File Variables** (`@var = value` at the top of the file)
 8. **Interactive Request Prompts** (`# @prompt`, `# @secret`)
 
+> `# @secret` values stay in memory for the current session and are never written to disk. `# @prompt` values and tokens exported with `# @env-json-key` / `# @env-header-key` are saved to `stdpath("data")/nuntio_globals.json` so they survive restarts. Use `# @secret` for anything sensitive.
+
 ---
 
 ## 🛠 Commands & Keymaps
