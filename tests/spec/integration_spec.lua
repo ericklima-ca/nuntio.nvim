@@ -348,6 +348,9 @@ GET http://127.0.0.1:19877/browse
 ]]
 
   it("scenario: chains and cookies stay isolated per virtual user and iteration", function()
+    -- Earlier specs may leave a global "login" response in Store; steps must ignore it
+    local login_before = Store.get_by_name("login")
+    local history_before = #Store.history
     local state, err = run_plan(scenario_doc, 1)
     assert_true(state ~= nil, err)
     local r = state.report
@@ -359,8 +362,9 @@ GET http://127.0.0.1:19877/browse
     assert_eq(steps.profile.total, 12)
     assert_eq(r.breakdown.scenarios[1].iterations, 12)
     assert_eq(r.breakdown.scenarios[1].ok, 12)
-    -- Scenario runs must not leak into the global history used by normal chaining
-    assert_true(Store.get_by_name("login") == nil, "login response stayed out of Store")
+    -- Scenario runs must not write into the global history used by normal chaining
+    assert_true(Store.get_by_name("login") == login_before, "global login entry untouched")
+    assert_eq(#Store.history, history_before, "no responses added to history")
   end)
 
   it("scenario: mix picks scenarios by weight", function()
