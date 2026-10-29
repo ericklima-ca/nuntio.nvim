@@ -188,3 +188,14 @@ Content-Type: application/json
 # @curl-insecure
 GET {{baseUrl}}/redirect/2
 Accept: text/html
+
+### 20. Load Test with Per-Iteration Data (:Nuntio load)
+# Each iteration re-resolves the request: {{data.*}} takes the next CSV row,
+# {{$iteration}} / {{$vu}} change, and every response is checked by @assert.
+# Override from the command line: :Nuntio load requests=50 concurrency=5
+# @load requests=20 concurrency=4
+# @data ./products.csv mode=random
+# @assert status == 200
+# @assert body $.args.store exists
+GET {{baseUrl}}/anything/products/{{data.sku}}?store={{data.store}}&iteration={{$iteration}}&vu={{$vu}}
+Accept: application/json

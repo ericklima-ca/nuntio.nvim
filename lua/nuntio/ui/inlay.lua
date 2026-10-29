@@ -79,6 +79,23 @@ function M.set_error(bufnr, line_nr, err_msg)
   })
 end
 
+--- Set an arbitrary label on a request line (load test progress and summary)
+---@param bufnr integer
+---@param line_nr integer 1-based line number
+---@param text string
+---@param hl string
+function M.set_text(bufnr, line_nr, text, hl)
+  if not Config.get().inlay_icons or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  pcall(vim.api.nvim_buf_clear_namespace, bufnr, ns_id, line_nr - 1, line_nr)
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, line_nr - 1, 0, {
+    virt_text = { { text, hl } },
+    virt_text_pos = "eol",
+    hl_mode = "combine",
+  })
+end
+
 --- Clear inlays in a buffer
 ---@param bufnr integer
 function M.clear(bufnr)

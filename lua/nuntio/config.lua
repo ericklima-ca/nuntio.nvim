@@ -18,6 +18,11 @@ local M = {}
 ---@field hover? boolean Enable hover inspection
 ---@field document_symbols? boolean Enable document symbol outlines
 
+---@class NuntioLoadConfig
+---@field defaults? { requests?: integer, concurrency?: integer } Used when neither # @load nor arguments set them
+---@field curl? { max_concurrency?: integer, max_requests?: integer, max_duration?: integer } Hard limits for the curl backend (max_duration in seconds)
+---@field client_bound_threshold? number Share of request time spent in local overhead that flags a run as client-bound
+
 ---@class NuntioConfig
 ---@field default_env? string
 ---@field environment_scope? "b"|"g"
@@ -30,6 +35,7 @@ local M = {}
 ---@field dividers? { enabled?: boolean, icon?: string, shared_icon?: string, hint?: boolean, style?: "above" | "eol" | "both" }
 ---@field lsp? NuntioLspConfig
 ---@field ui? NuntioUIConfig
+---@field load? NuntioLoadConfig
 
 ---@type NuntioConfig
 M.defaults = {
@@ -69,6 +75,18 @@ M.defaults = {
     max_response_size = 1048576, -- 1MB
     picker = "auto",
     find_scope = "buffer",
+  },
+  load = {
+    defaults = {
+      requests = 100,
+      concurrency = 10,
+    },
+    curl = {
+      max_concurrency = 50,
+      max_requests = 5000,
+      max_duration = 300,
+    },
+    client_bound_threshold = 0.3,
   },
 }
 

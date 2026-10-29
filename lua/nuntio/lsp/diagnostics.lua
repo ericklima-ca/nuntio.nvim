@@ -1,6 +1,8 @@
 local Assertions = require("nuntio.assertions")
 local Document = require("nuntio.parser.document")
 local Env = require("nuntio.env")
+local Load = require("nuntio.load")
+local LoadData = require("nuntio.load.data")
 
 local M = {}
 
@@ -58,13 +60,61 @@ function M.check(bufnr)
   local env_vars = Env.resolve(buf_dir, bufnr)
   local meta_vars = get_metadata_declared_vars(blocks)
   local named_requests = get_named_requests(blocks)
+  local has_data = false
+  for _, b in ipairs(blocks) do
+    if b.metadata and b.metadata["data"] then
+      has_data = true
+      break
+    end
+  end
 
   local diagnostics = {}
 
   for lnum, line in ipairs(lines) do
     local l_idx = lnum - 1 -- 0-based for LSP diagnostics
 
-    -- 0. Validate `# @assert` syntax (comment lines are skipped below)
+    -- 0a. Validate `# @load` options and `# @data` files
+    local load_col, load_expr = line:match("^%s*#%s*@load()(.*)$")
+    if load_col and (load_expr == "" or load_expr:match("^%s")) then
+      local _, err = Load.parse_options(vim.split(vim.trim(load_expr), "%s+", { trimempty = true }))
+      if err then
+        table.insert(diagnostics, {
+          bufnr = bufnr,
+          lnum = l_idx,
+          end_lnum = l_idx,
+          col = load_col - 1,
+          end_col = #line,
+          severity = vim.diagnostic.severity.ERROR,
+          source = "nuntio",
+          message = "Invalid @load: " .. err,
+        })
+      end
+    end
+
+    local data_col, data_expr = line:match("^%s*#%s*@data()(.*)$")
+    if data_col and (data_expr == "" or data_expr:match("^%s")) then
+      local spec, err = LoadData.parse_directive(data_expr)
+      if spec then
+        local abs_path = spec.path:match("^/") and spec.path or vim.fs.joinpath(buf_dir, spec.path)
+        if not vim.uv.fs_stat(vim.fs.normalize(abs_path)) then
+          err = "data file not found: '" .. spec.path .. "'"
+        end
+      end
+      if err then
+        table.insert(diagnostics, {
+          bufnr = bufnr,
+          lnum = l_idx,
+          end_lnum = l_idx,
+          col = data_col - 1,
+          end_col = #line,
+          severity = vim.diagnostic.severity.ERROR,
+          source = "nuntio",
+          message = "Invalid @data: " .. err,
+        })
+      end
+    end
+
+    -- 0b. Validate `# @assert` syntax (comment lines are skipped below)
     local assert_col, assert_expr = line:match("^%s*#%s*@assert()(.*)$")
     if assert_col and (assert_expr == "" or assert_expr:match("^%s")) then
       local _, err = Assertions.parse(assert_expr)
@@ -122,6 +172,9 @@ function M.check(bufnr)
         -- Allow metadata-declared variables (# @prompt, # @secret, # @env-json-key, # @env-header-key)
         local is_meta = meta_vars[v] == true
 
+        -- Allow load test data columns when the document declares # @data
+        local is_data = has_data and v:match("^data%.") ~= nil
+
         -- Allow chained request references: <req_name>.response...
         local is_chain = false
         local req_prefix = v:match("^([%w_%-]+)%.response%.")
@@ -129,7 +182,7 @@ function M.check(bufnr)
           is_chain = true
         end
 
-        if not (is_dynamic or is_doc or is_env or is_meta or is_chain) then
+        if not (is_dynamic or is_doc or is_env or is_meta or is_chain or is_data) then
           table.insert(diagnostics, {
             bufnr = bufnr,
             lnum = l_idx,

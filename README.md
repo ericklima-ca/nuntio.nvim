@@ -30,6 +30,7 @@ Powered by native `curl`, `tree-sitter-http`, and Neovim's async system API.
   - **Code Actions**: Quick triggers to run requests, copy as cURL, switch environments, and inspect cookies.
   - **Document Formatter (`textDocument/formatting`)**: Format `.http` files with `gq` or `:Nuntio format`—uppercases methods, aligns headers, formats JSON bodies, and safely preserves embedded template variables (`{{vars}}`).
 - **Response Assertions (`# @assert`)**: Turn `.http` files into API tests with checks on status, headers, JSON body fields (JSONPath), and latency. Results appear inline (`✔ 201 (45ms) · 5/5 passed`), in a dedicated **Tests** tab, and in the `:Nuntio run_all` summary. Malformed assertions are flagged by the LSP.
+- **Load Testing (`:Nuntio load`)**: Send N requests (or run for a duration) at a set concurrency, with per-iteration values (`{{$iteration}}`, `{{$vu}}`, CSV/JSON rows via `# @data`) and `# @assert` checks on every response. A live report shows throughput, success rate, status codes, p50–p99 latency and a histogram. The curl backend has hard limits and warns when your machine, not the server, is the bottleneck.
 - **Live Response Filter (`F` / JQ / JSONPath)**: Press `F` or `f` in the response window to live-filter large JSON responses in real-time with JQ or JSONPath syntax. Copy the query directly to your clipboard with `<C-y>` for chaining.
 - **Advanced Fuzzy Request Picker (`:Nuntio find` / `<leader>rf`)**:
   - Search requests across the **current buffer** or the entire **workspace** (`**/*.http`).
@@ -157,6 +158,14 @@ require("nuntio").setup({
     picker = "auto",           -- "auto", "telescope", "snacks", "fzf_lua", "builtin", "ui_select"
     find_scope = "buffer",     -- Default search scope: "buffer" or "workspace"
   },
+
+  -- Load testing (:Nuntio load)
+  load = {
+    defaults = { requests = 100, concurrency = 10 }, -- When neither # @load nor arguments set them
+    -- Hard limits for the curl backend: runs above them are refused
+    curl = { max_concurrency = 50, max_requests = 5000, max_duration = 300 }, -- duration in seconds
+    client_bound_threshold = 0.3, -- Warn when >30% of request time is local overhead
+  },
 })
 ```
 
@@ -256,6 +265,8 @@ When the same variable exists across sources, `nuntio.nvim` resolves conflicts i
 | `:Nuntio close`         | Close the response view window                               |
 | `:Nuntio clear_history` | Clear stored response history                                |
 | `:Nuntio lsp_restart`   | Restart in-process language server sessions                  |
+| `:Nuntio load [opts]`   | Load test request under cursor (`requests= concurrency= duration= timeout=`) |
+| `:Nuntio cancel`        | Cancel a running load test (keeps partial results)           |
 
 ### Response Window Keymaps
 
@@ -385,6 +396,43 @@ Operators: `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `!contains`, `matches` 
 - Assertions under `### Shared` apply to every request in the file (e.g. `# @assert status < 500`).
 - When a request has assertions, they decide pass/fail instead of the status code, so `# @assert status == 404` makes a 404 a passing test.
 - Assertions see the original response, before any `# @jq` transformation.
+
+---
+
+## 🚀 Load Testing
+
+Run `:Nuntio load` on a request to send it many times at a set concurrency:
+
+```http
+### Search under load
+# @load requests=500 concurrency=20
+# @data ./products.csv mode=random
+# @assert status == 200
+# @assert duration < 800
+GET {{baseUrl}}/products/{{data.sku}}?store={{data.store}}&i={{$iteration}}
+```
+
+- **Settings**: `# @load requests=N concurrency=C`, or `duration=30s` to run for a set time (both can be combined; the first limit reached stops the run). `timeout=` sets a per-request timeout in ms. Arguments override the directive: `:Nuntio load requests=50 concurrency=5`.
+- **New values on every iteration**: the request is resolved again for each iteration, so `{{$uuid}}`, `{{$randomInt}}`, `{{$iteration}}` (1..N), `{{$vu}}` (virtual user, 1..concurrency) and `{{$vuIteration}}` change every time.
+- **Data files**: `# @data ./file.csv` (header row) or `./file.json` (array of objects); columns become `{{data.<column>}}`. Modes: `circular` (default, wraps around), `sequential` (stops when rows run out), `random`, `unique` (each row once, random order).
+- **Assertions**: `# @assert` lines are checked on every response. A request counts as successful when all assertions pass (or, without assertions, on a 2xx/3xx status).
+- **Report**: a live view in the response window with throughput, success rate, status counts, latency percentiles (from curl's own timings), a histogram, grouped errors and failed assertions. The request line shows progress (`⏳ 213/500`), then a summary (`✔ 59 rps · 500/500 ok · p95 301ms`). In the report: `<C-c>` cancels, `R` reruns, `q` closes.
+- Load runs don't touch response history, chained variables or the cookie jar.
+
+### curl backend limits
+
+Each request spawns one `curl` process. That keeps per-iteration values, data files and assertions simple, but it caps throughput. On a 4-core machine, plain `curl` processes against a local server topped out around **350 req/s**, with no gain beyond about 10 concurrent requests. nuntio's own per-request work lowers this further.
+
+| Use case | Tool |
+|---|---|
+| Realistic traffic: per-iteration values, data files, assertions, tens to a few hundred req/s | `:Nuntio load` |
+| Raw throughput: thousands of req/s, the same request repeated | [oha](https://github.com/hatoo/oha), [vegeta](https://github.com/tsenart/vegeta), [k6](https://k6.io) |
+
+To keep results honest:
+
+1. **Hard limits**: runs above `load.curl.max_concurrency` (50), `max_requests` (5000) or `max_duration` (300s) are refused with an explanation. Raise them in `setup()` if you need to.
+2. **Client-bound detection**: nuntio compares each request's total client-side time with curl's own transfer time. When more than 30% of the time is local overhead (process spawning, scheduling), the report shows `⚠ Client-bound`: throughput is a lower bound that measures your machine, not the server.
+3. `:checkhealth nuntio` lists which dedicated load tools are installed.
 
 ---
 

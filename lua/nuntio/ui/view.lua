@@ -422,9 +422,10 @@ local function ensure_buffer()
 end
 
 --- Open or reuse window for the buffer
+---@param buf? integer Buffer to show (defaults to the response buffer)
 ---@return integer winid
-local function open_window()
-  local buf = ensure_buffer()
+local function open_window(buf)
+  buf = buf or ensure_buffer()
   if M.winid and vim.api.nvim_win_is_valid(M.winid) then
     vim.api.nvim_win_set_buf(M.winid, buf)
     return M.winid
@@ -574,6 +575,18 @@ function M.display(response)
   end
   open_window()
   render_view(response)
+end
+
+--- Show another nuntio buffer (e.g. the load report) in the response window
+---@param buf integer
+---@param winbar? string
+---@return integer winid
+function M.show_buffer(buf, winbar)
+  local winid = open_window(buf)
+  if winbar and Config.get().ui.winbar then
+    vim.api.nvim_set_option_value("winbar", winbar, { win = winid })
+  end
+  return winid
 end
 
 --- Switch active pane view

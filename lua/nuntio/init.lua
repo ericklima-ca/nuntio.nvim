@@ -202,6 +202,41 @@ function M.copy_as_curl()
   vim.notify("Copied as cURL command to clipboard!", vim.log.levels.INFO)
 end
 
+--- Load test the request at cursor
+--- Arguments override `# @load`: requests=N concurrency=C duration=30s timeout=5000
+---@param ... string
+function M.load(...)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local buffer_dir = vim.fn.expand("%:p:h")
+  if not buffer_dir or buffer_dir == "" then buffer_dir = vim.uv.cwd() end
+
+  local lnum = vim.api.nvim_win_get_cursor(0)[1]
+  local blocks, doc_vars, shared_block = parse_current(bufnr)
+  local block = Document.get_block_at_line(blocks, lnum)
+  if not block then
+    vim.notify("nuntio: no request found at cursor", vim.log.levels.WARN)
+    return
+  end
+
+  require("nuntio.ui.load_view").start({
+    block = block,
+    doc_vars = doc_vars,
+    bufnr = bufnr,
+    buffer_dir = buffer_dir,
+    shared_block = shared_block,
+    args = { ... },
+  })
+end
+
+--- Cancel a running load test (keeps partial results), or in-flight requests
+function M.cancel()
+  if require("nuntio.load").cancel() then
+    return
+  end
+  require("nuntio.transport.curl").cancel_all()
+  vim.notify("nuntio: cancelled in-flight requests", vim.log.levels.INFO)
+end
+
 --- Convert clipboard or input curl command into .http and insert at cursor
 function M.from_curl()
   local clipboard = vim.fn.getreg("+")

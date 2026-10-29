@@ -1,4 +1,5 @@
 local Document = require("nuntio.parser.document")
+local Load = require("nuntio.load")
 local Runner = require("nuntio.runner")
 local Store = require("nuntio.store")
 local Utils = require("nuntio.utils")
@@ -15,7 +16,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("X-Server", "nuntio-test-server")
         self.end_headers()
-        self.wfile.write(json.dumps({"status": "ok", "user_id": 99}).encode("utf-8"))
+        self.wfile.write(json.dumps({"status": "ok", "user_id": 99, "path": self.path}).encode("utf-8"))
 
     def do_POST(self):
         length = int(self.headers.get("content-length", 0))
@@ -192,6 +193,99 @@ GET http://127.0.0.1:19877/user
     assert_eq(summary.results[1].expr, "status < 500", "shared assertion runs first")
     assert_eq(summary.results[4].expr, "body $.user_id == 99", "variables interpolated")
     assert_eq(summary.results[6].ok, false, "missing field fails")
+  end)
+
+  --- Start a load test for the first request in `text` and wait for it to finish
+  local function run_load(text, buffer_dir, args)
+    local blocks, doc_vars = Document.parse_document(Utils.split_lines(text))
+    local state, err = Load.start({
+      block = blocks[1],
+      doc_vars = doc_vars,
+      bufnr = 0,
+      buffer_dir = buffer_dir or vim.uv.cwd(),
+      args = args,
+    })
+    if not state then return nil, err end
+    vim.wait(15000, function() return state.finished end, 20)
+    return state
+  end
+
+  it("load test: sends N requests with per-iteration data and assertions", function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    Utils.write_file(vim.fs.joinpath(dir, "skus.csv"), "sku\nA1\nB2\nC3\n")
+
+    local state = run_load([[
+# @load requests=12 concurrency=3
+# @data ./skus.csv mode=circular
+# @assert status == 200
+# @assert body $.path matches ^/item/%u%d%?i=%d+&vu=%d$
+GET http://127.0.0.1:19877/item/{{data.sku}}?i={{$iteration}}&vu={{$vu}}
+]], dir)
+    assert_true(state.finished, "load test finished")
+    local r = state.report
+    assert_eq(r.total, 12)
+    assert_eq(r.succeeded, 12, vim.inspect(r.assert_errors) .. vim.inspect(r.errors))
+    assert_eq(r.statuses["200"], 12)
+    assert_eq(next(r.errors), nil)
+    assert_true(r.latency ~= nil and r.latency.p95 > 0, "latency measured from curl stats")
+    assert_eq(state.dispatched, 12)
+    assert_nil(Load.active, "no load test left running")
+    assert_true(Load.last == state)
+  end)
+
+  it("load test: sequential data stops when rows run out", function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    Utils.write_file(vim.fs.joinpath(dir, "two.csv"), "sku\nA1\nB2\n")
+    local state = run_load([[
+# @load requests=10 concurrency=2
+# @data ./two.csv mode=sequential
+GET http://127.0.0.1:19877/item/{{data.sku}}
+]], dir)
+    assert_eq(state.report.total, 2)
+    assert_true(state.exhausted)
+  end)
+
+  it("load test: failing assertions count as failures", function()
+    local state = run_load([[
+# @assert status == 201
+GET http://127.0.0.1:19877/user
+]], nil, { "requests=4", "concurrency=2" })
+    assert_eq(state.report.total, 4)
+    assert_eq(state.report.succeeded, 0)
+    assert_eq(state.report.assert_errors["status == 201"], 4)
+  end)
+
+  it("load test: duration mode runs until the deadline", function()
+    local state = run_load("GET http://127.0.0.1:19877/user", nil, { "duration=1s", "concurrency=2" })
+    assert_true(state.report.total > 0)
+    assert_true(state.report.elapsed_ms >= 1000, "ran for the whole duration")
+    assert_eq(state.report.failed, 0)
+  end)
+
+  it("load test: refuses runs above the curl backend limits", function()
+    local state, err = run_load("GET http://127.0.0.1:19877/user", nil, { "requests=100", "concurrency=500" })
+    assert_nil(state)
+    assert_true(err:find("exceeds curl backend limits", 1, true) ~= nil, err)
+    assert_nil(Load.active)
+  end)
+
+  it("load test: cancel keeps partial results", function()
+    local blocks, doc_vars = Document.parse_document({ "GET http://127.0.0.1:19877/user" })
+    local state = Load.start({
+      block = blocks[1],
+      doc_vars = doc_vars,
+      bufnr = 0,
+      buffer_dir = vim.uv.cwd(),
+      args = { "duration=30s", "concurrency=2" },
+    })
+    vim.wait(5000, function() return state.completed >= 3 end, 20)
+    assert_true(Load.cancel(), "cancel reports a running test")
+    assert_true(state.finished and state.cancelled)
+    assert_true(state.report.total >= 3)
+    assert_nil(Load.active)
+    assert_true(not Load.cancel(), "nothing left to cancel")
   end)
 
   -- Terminate background server
