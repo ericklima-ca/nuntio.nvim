@@ -1,0 +1,33 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor / IDE files
+*.swp
+*.swo
+*.swn
+*~
+*.bak
+*.orig
+*.rej
+.netrwhist
+[._]*.un~
+.vscode/
+.idea/
+
+# Temporary run outputs
+robots_output.txt
+*.log
+/tmp/
+
+# Private environment files (excluding repo examples)
+.env.local
+.env.*.local
+.env.private
+*.private.env.json
+!examples/http-client.private.env.json

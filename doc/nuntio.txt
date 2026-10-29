@@ -1,0 +1,311 @@
+*nuntio.txt*  Pure Lua HTTP Client for Neovim
+
+==============================================================================
+CONTENTS                                                     *nuntio-contents*
+
+  1. Overview ............................................... |nuntio-overview|
+  2. Setup & Configuration .................................. |nuntio-setup|
+  3. Commands & Keymaps ..................................... |nuntio-commands|
+  4. Environments & Private Secrets ......................... |nuntio-environments|
+  5. .http Syntax & Features ................................ |nuntio-syntax|
+  6. Request Chaining & Dependencies ........................ |nuntio-chaining|
+  7. Body Files, Multipart & Cookies ........................ |nuntio-files|
+  8. In-Process Language Server (LSP) ....................... |nuntio-lsp|
+  9. Document Formatter ..................................... |nuntio-formatter|
+  10. Live Response Filter (JQ / JSONPath) .................. |nuntio-filter|
+  11. Advanced Fuzzy Request Picker ......................... |nuntio-picker|
+  12. Health Check .......................................... |nuntio-health|
+
+==============================================================================
+1. OVERVIEW                                                  *nuntio-overview*
+
+nuntio.nvim is a fast, pure Lua HTTP client for Neovim built for daily
+developer workflows. It requires only standard `curl` and Neovim >= 0.10.
+There are no external proprietary binaries or license tokens.
+
+==============================================================================
+2. SETUP & CONFIGURATION                                       *nuntio-setup*
+
+Configure nuntio in your init.lua or lazy.nvim specification:
+>lua
+    require("nuntio").setup({
+      default_env = "dev",
+      environment_scope = "b",      -- "b" (per-buffer) or "g" (global)
+      auto_run_dependencies = true, -- Automatically execute prerequisites
+      dividers = {
+        enabled = true,
+        icon = "󰖟",
+        shared_icon = "󰒘",
+        hint = true,                -- Show [▶ <CR>] run badge
+        style = "above",            -- "above", "eol", or "both"
+      },
+      lsp = {
+        enable = true,              -- Enable in-process LSP client (vim.lsp.start)
+        diagnostics = true,         -- Flag missing files (< ./file) and undefined variables
+        completion = true,          -- Auto-complete headers, MIME types, env vars, methods
+        hover = true,               -- Inspect variable values, sources, and RFC header docs
+        document_symbols = true,    -- Outline request blocks in Telescope, Snacks, and aerial
+      },
+      ui = {
+        display_mode = "split",     -- "split" or "float"
+        split_direction = "right",  -- "right" or "below"
+        width = 0.45,
+        height = 0.45,
+        default_view = "body",      -- "body", "headers", "chain", "stats"
+        winbar = true,
+        picker = "auto",            -- "auto", "telescope", "snacks", "fzf_lua", "builtin", "ui_select"
+        find_scope = "buffer",      -- Default search scope: "buffer" or "workspace"
+      },
+    })
+<
+
+==============================================================================
+3. COMMANDS & KEYMAPS                                        *nuntio-commands*
+
+COMMANDS                                                    *nuntio-commands*
+
+:Nuntio run            Execute request at cursor or visual selection
+:Nuntio run_all        Execute all requests in current buffer
+:Nuntio replay         Replay last executed request
+:Nuntio inspect        Preview resolved request and curl command
+:Nuntio curl           Copy request at cursor as cURL command to clipboard
+:Nuntio from_curl      Convert clipboard or pasted curl command to .http
+:Nuntio env            Open environment switcher (vim.ui.select)
+:Nuntio find [scope]   Fuzzy-search requests (scope: "buffer" or "workspace")
+:Nuntio format         Format current .http document (headers, JSON, spacing)
+:NuntioFormat          Convenience command to format current .http document
+:Nuntio filter         Open interactive live response filter prompt (JQ / JSONPath)
+:Nuntio filter_clear   Clear active response filter and restore full response body
+:Nuntio next           Jump to next request block
+:Nuntio prev           Jump to previous request block
+:Nuntio scratchpad     Open scratchpad buffer with sample HTTP requests
+:Nuntio cookies        Inspect or manage active session cookie jar
+:Nuntio history        Open interactive response history picker
+:Nuntio diff           Open side-by-side diff comparing last two responses
+:Nuntio close          Close response view window
+:Nuntio clear_history  Clear stored response history
+:Nuntio lsp_restart    Restart in-process language server sessions
+
+RESPONSE WINDOW KEYMAPS                                      *nuntio-keymaps*
+
+Inside the response view buffer:
+  ] / [        Next / Previous view tab
+  <Tab>        Cycle forward through available view tabs
+  <S-Tab>      Cycle backward through available view tabs
+  b / B        Switch to Body (pure line 1 view)
+  h / H        Switch to Headers
+  a / A        Switch to All (Headers + Body)
+  c / C        Switch to Chain (execution timeline & variable flow)
+  s / S        Switch to Stats (detailed latency & size breakdown)
+  v / V        Switch to Raw cURL trace
+  F / f        Open interactive Live Filter (JQ / JSONPath)
+  X            Clear active response filter
+  H            Open interactive History Picker
+  D            Open side-by-side vimdiff with previous response
+  r            Replay current request
+  y            Yank response body to clipboard
+  q / <Esc>    Close response view window
+
+==============================================================================
+4. ENVIRONMENTS & PRIVATE SECRETS                         *nuntio-environments*
+
+nuntio.nvim searches parent directories up to workspace root and merges
+environment files. Multiple public and private formats are supported:
+
+  1. JetBrains Public JSON:   http-client.env.json
+  2. JetBrains Private JSON:  http-client.private.env.json (or *.env.private.json)
+  3. Dotenv Targets:          .env, .env.<env>
+  4. Dotenv Private:          .env.local, .env.<env>.local, .env.private
+  5. OS Environment Vars:     export KEY=value in your shell
+  6. Interactive Masked:      # @secret <var_name> in .http file
+
+VARIABLE PRECEDENCE (LOWEST TO HIGHEST):
+  1. OS Environment Variables
+  2. Base Dotenv (.env)
+  3. Environment Dotenv (.env.<current_env>)
+  4. Private Dotenv (.env.local, .env.<current_env>.local, .env.private)
+  5. Public JSON (http-client.env.json)
+  6. Private JSON (http-client.private.env.json)
+  7. In-Document Variables (@var = value)
+  8. Interactive Prompts (# @prompt, # @secret)
+
+==============================================================================
+5. .HTTP SYNTAX & FEATURES                                    *nuntio-syntax*
+
+GLOBAL DEFAULTS BLOCK:
+Headers and variables under `### Shared` are automatically merged into every
+subsequent request in the file:
+>http
+    ### Shared
+    User-Agent: nuntio.nvim/1.0
+    Authorization: Bearer {{SECRET_API_TOKEN}}
+<
+
+ALL HTTP METHODS SUPPORTED:
+GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, CONNECT, TRACE.
+>http
+    PUT https://api.example.com/items/1
+    PATCH https://api.example.com/items/1
+    DELETE https://api.example.com/items/1?force=true
+    HEAD https://api.example.com/items/1
+    OPTIONS https://api.example.com/items/1
+<
+
+==============================================================================
+6. REQUEST CHAINING & DEPENDENCIES                            *nuntio-chaining*
+
+Chaining can be established in two ways:
+
+1. EXPLICIT RESPONSE REFERENCING:
+Assign a `# @name` and reference response properties in downstream requests:
+>http
+    ### 1. Authenticate
+    # @name login
+    POST https://api.example.com/auth
+    Content-Type: application/json
+
+    { "user": "admin", "pass": "{{admin_pass}}" }
+
+    ### 2. Protected Resource
+    GET https://api.example.com/me
+    Authorization: Bearer {{login.response.body.$.access_token}}
+<
+
+2. DYNAMIC SESSION EXTRACTIONS:
+Extract variables directly from response JSON or headers:
+>http
+    ### Fetch Config
+    # @name config
+    # @env-json-key tenant_id = $.tenant.id
+    # @env-header-key server_type = Server
+    GET https://api.example.com/info
+
+    ### Consume Variables
+    GET https://api.example.com/tenants/{{tenant_id}}
+    X-Server: {{server_type}}
+<
+
+==============================================================================
+7. BODY FILES, MULTIPART & COOKIES                             *nuntio-files*
+
+SIMPLIFIED MULTIPART FORM-DATA:
+No manual MIME boundaries or CRLF hyphens needed:
+>http
+    POST https://api.example.com/upload
+    Content-Type: multipart/form-data
+
+    title = Document Upload
+    file = < ./files/report.pdf; type=application/pdf
+<
+
+BODY FILE INCLUSION:
+>http
+    POST https://api.example.com/data
+    Content-Type: application/json
+
+    < ./payloads/create_data.json
+<
+Variables (`{{var}}`) inside included text files are evaluated automatically.
+
+Manage cookies across requests automatically or use `# @no-cookie-jar` to
+disable cookie persistence for specific requests. Open the active cookie jar
+using `:Nuntio cookies`.
+
+==============================================================================
+8. IN-PROCESS LANGUAGE SERVER (LSP)                            *nuntio-lsp*
+
+nuntio.nvim provides a built-in, zero-binary language server powered by
+Neovim's `vim.lsp.start` API. It activates automatically on *.http and *.rest
+buffers:
+
+AUTOCOMPLETION:
+- HTTP Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+- RFC Standard Headers: Content-Type, Authorization, Accept, Cache-Control, etc.
+- MIME Media Types: application/json, multipart/form-data, etc.
+- Template Variables: dynamic `$uuid`, `$timestamp`, in-file `@var` declarations,
+  active environment variables from `http-client.env.json`, and chained response
+  paths (`{{login.response.body.$.token}}`).
+- Metadata & Directives: `# @name`, `# @prompt`, `# @secret`, `# @curl-*`.
+
+HOVER INSPECTION:
+Hovering over a variable (`{{var}}`) reveals its current evaluated value and
+originating source file layer. Hovering over headers or methods displays
+official RFC documentation.
+
+REAL-TIME DIAGNOSTICS:
+- Flags missing external payload files (`< ./missing.json`).
+- Warns on undefined variables (`{{unknown}}`).
+- Flags missing target URLs on HTTP method lines.
+
+DOCUMENT SYMBOLS:
+Exports structured symbol trees for every request and variable definition,
+enabling rich outline browsing via Telescope, Snacks, or aerial.
+
+CODE ACTIONS:
+Provides contextual code actions to run requests, copy as cURL, switch
+environments, and inspect cookie jars.
+
+==============================================================================
+9. DOCUMENT FORMATTER                                     *nuntio-formatter*
+
+nuntio.nvim includes a built-in LSP document formatter conforming to
+`textDocument/formatting`. It can be triggered via standard Neovim formatting:
+- Press `gq` or run `:lua vim.lsp.buf.format()`
+- Run `:Nuntio format` or `:NuntioFormat`
+
+The formatter automatically:
+- Uppercases HTTP methods (`get` -> `GET`, `post` -> `POST`).
+- Formats HTTP header colons with consistent spacing (`Name: Value`).
+- Formats and indents JSON request bodies (2-space indentation).
+- Safely preserves embedded template variables (`{{variable}}`) inside JSON
+  without breaking or escaping them.
+- Standardizes empty line padding between `###` request boundary sections.
+
+==============================================================================
+10. LIVE RESPONSE FILTER (JQ / JSONPATH)                     *nuntio-filter*
+
+When inspecting large JSON responses in the response window:
+- Press `F` or `f` (or execute `:Nuntio filter`).
+- A floating input bar opens, allowing live filtering via JSONPath
+  (e.g., `$.items[0].id` or `.users[]`) or standard JQ syntax.
+- Real-time updates: As you type, the response buffer instantly evaluates
+  and displays the matching data.
+- Copy path: Press `<C-y>` to yank the current filter expression into your
+  clipboard, making request chaining syntax effortless.
+- The active winbar displays a `[󰈲 query]` filter badge.
+- Press `X` or execute `:Nuntio filter_clear` to clear the filter and restore
+  the full original response body.
+
+==============================================================================
+11. ADVANCED FUZZY REQUEST PICKER                            *nuntio-picker*
+
+Find, preview, and execute HTTP requests across your project:
+- Trigger via `:Nuntio find` (or `:Nuntio find workspace` / `:Nuntio find buffer`).
+- Keymap: `<leader>rf` or `<leader>Rf`.
+
+KEY CAPABILITIES:
+- Multi-Scope Discovery:
+  - Buffer Scope: Searches all requests in the active buffer.
+  - Workspace Scope: Scans all `*.http` and `*.rest` files in the workspace,
+    automatically ignoring `.git`, `node_modules`, `.venv`, and build caches.
+  - Press `<Tab>` inside the picker to toggle dynamically between buffer and
+    workspace scope.
+- Integration Adapters:
+  - Telescope: Rich method badges, `#name` labels, and live buffer preview.
+  - Snacks.picker: Native chunk highlights, fast position jumping, and live preview.
+  - FZF-Lua: Fast terminal fuzzy-search with parsed locations.
+  - Built-in Dual-Pane Floating Picker: Zero external dependencies required.
+    Displays a left list pane with method badges and a right pane with live
+    `.http` preview.
+  - vim.ui.select: Clean modal fallback for standard selectors.
+- Key Actions:
+  - `<CR>`: Jump to the request definition and center view (`zz`).
+  - `<C-r>` / `<C-e>`: Execute request immediately from the picker without jumping.
+
+==============================================================================
+12. HEALTH CHECK                                              *nuntio-health*
+
+Run `:checkhealth nuntio` to verify system requirements (curl, jq, and
+tree-sitter http grammar).
+
+vim:tw=78:ts=8:ft=help:norl:

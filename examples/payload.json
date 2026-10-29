@@ -1,0 +1,12 @@
+{
+  "source": "external_payload_file",
+  "client": "{{clientName}}",
+  "generated_at": "{{$isoTimestamp}}",
+  "request_id": "{{$uuid}}",
+  "data": {
+    "items": [
+      { "id": 1, "name": "Item Alpha" },
+      { "id": 2, "name": "Item Beta" }
+    ]
+  }
+}

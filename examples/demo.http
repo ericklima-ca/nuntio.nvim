@@ -1,0 +1,184 @@
+# ==============================================================================
+# nuntio.nvim - Complete Feature Showcase (.http file)
+# ==============================================================================
+# Quick Keymaps (LazyVim / default):
+#   <leader>Rs  : Send request under cursor (or visual selection)
+#   <leader>Ra  : Send all requests in buffer sequentially with summary
+#   <leader>Re  : Select environment (dev, staging, prod)
+#   <leader>Rf  : Find and fuzzy-search requests (buffer / workspace)
+#   <leader>Rj  : Inspect and manage active cookie jar
+#   <leader>Ri  : Inspect resolved request & curl command
+#   <leader>Rc  : Copy request as curl command to clipboard
+#   <leader>RC  : Paste curl command and convert to .http
+#   <leader>Rn  : Jump to next request block
+#   <leader>Rp  : Jump to previous request block
+#   <leader>Rt  : Toggle response view
+#   <leader>Rq  : Close response view window
+# ==============================================================================
+
+@baseUrl = https://httpbin.org
+@clientName = nuntio.nvim
+
+### Shared
+# Headers in ### Shared are automatically injected into every request below
+User-Agent: nuntio.nvim/1.0
+X-Demo-Suite: active
+
+### 1. Simple GET Request with Query Parameters
+GET {{baseUrl}}/get?query=nuntio&filter=all
+Accept: application/json
+
+### 2. POST JSON with Built-in Dynamic Variables
+# @name create_session
+POST {{baseUrl}}/post
+Content-Type: application/json
+Authorization: Bearer {{SECRET_API_TOKEN}}
+
+{
+  "client": "{{clientName}}",
+  "environment": "{{ENV_NAME}}",
+  "uuid": "{{$uuid}}",
+  "timestamp": "{{$timestamp}}",
+  "iso_time": "{{$isoTimestamp}}",
+  "random_id": {{$randomInt 1000 9999}}
+}
+
+### 3. Request Chaining (Reference Response of Request #2)
+# Access previous response body (JSONPath), headers, or status
+# @name chained_request
+POST {{baseUrl}}/anything
+Content-Type: application/json
+
+{
+  "session_uuid": "{{create_session.response.body.$.json.uuid}}",
+  "client_echo": "{{create_session.response.body.$.json.client}}",
+  "server_date": "{{create_session.response.headers.date}}"
+}
+
+### 4. Full Resource Replacement with PUT
+# Replaces an existing resource entity with a complete new representation
+PUT {{baseUrl}}/put
+Content-Type: application/json
+
+{
+  "user_id": "usr_9942",
+  "name": "Alex Mercer",
+  "role": "Lead Architect",
+  "permissions": ["read", "write", "admin"],
+  "active": true,
+  "updated_at": "{{$isoTimestamp}}"
+}
+
+### 5. Partial Update with PATCH
+# Modifies specific fields of an existing entity without overwriting the whole object
+PATCH {{baseUrl}}/patch
+Content-Type: application/json
+
+{
+  "role": "Principal Systems Engineer",
+  "status": "online"
+}
+
+### 6. Resource Deletion with DELETE
+# Removes a resource with query parameters, confirmation header, and audit payload
+DELETE {{baseUrl}}/delete?id=usr_9942&permanent=true
+Content-Type: application/json
+X-Confirm-Delete: yes
+
+{
+  "reason": "Decommissioned test user",
+  "deleted_by": "{{clientName}}"
+}
+
+### 7. Inspect Resource Metadata with HEAD
+# Fetches HTTP headers (Content-Length, Content-Type, Date) without downloading body
+HEAD {{baseUrl}}/get
+Accept: application/json
+
+### 8. Discover Allowed Methods & CORS with OPTIONS
+# Queries allowed HTTP methods and CORS policies for the endpoint
+OPTIONS {{baseUrl}}/get
+Origin: https://myapp.example.com
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: Authorization, Content-Type
+
+### 9. Dynamic Environment Extraction (# @env-json-key & # @env-header-key)
+# Extracts fields into session variables for subsequent requests (no scripts needed)
+# @name extract_metadata
+# @env-json-key slideshow_author = $.slideshow.author
+# @env-header-key server_type = Server
+GET {{baseUrl}}/json
+Accept: application/json
+
+### 10. Using Variables Extracted from Request #9
+GET {{baseUrl}}/get?author={{slideshow_author}}
+X-Previous-Server: {{server_type}}
+
+### 11. External Body File Inclusion (< ./payload.json)
+# Reads external file; {{variables}} inside the file are evaluated automatically
+POST {{baseUrl}}/post
+Content-Type: application/json
+
+< ./payload.json
+
+### 12. Multipart Form-Data (Simplified Syntax - No Hyphens, No Boundary Clutter!)
+# nuntio.nvim automatically translates fields to native multipart and generates boundaries
+POST {{baseUrl}}/post
+Content-Type: multipart/form-data
+
+title = Demo File Upload
+file = < ./payload.json; type=application/json
+
+### 13. Multipart Form-Data (Traditional RFC 7578 Raw Syntax)
+# Hand-written MIME boundaries with CRLF line endings (supported for compatibility)
+POST {{baseUrl}}/post
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary{{$timestamp}}
+
+------WebKitFormBoundary{{$timestamp}}
+Content-Disposition: form-data; name="title"
+
+Demo File Upload
+------WebKitFormBoundary{{$timestamp}}
+Content-Disposition: form-data; name="file"; filename="payload.json"
+Content-Type: application/json
+
+< ./payload.json
+------WebKitFormBoundary{{$timestamp}}--
+
+### 14. Response Filtering via jq (# @jq)
+# Automatically pipes and filters the response through jq before displaying
+# @jq .slideshow.slides[] | {title: .title, type: .type}
+GET {{baseUrl}}/json
+Accept: application/json
+
+### 15. Response Redirection (>> file or >>! file)
+# Saves response body to disk (>> appends, >>! overwrites)
+GET {{baseUrl}}/robots.txt
+>>! ./robots_output.txt
+
+### 16. Automatic Cookie Persistence
+# Cookies returned from responses are automatically stored in nuntio's cookie jar
+GET {{baseUrl}}/cookies/set?session_token=token_xyz_98765
+
+### 17. Request with Cookies Disabled (# @no-cookie-jar)
+# @no-cookie-jar
+GET {{baseUrl}}/cookies
+
+### 18. Interactive User Prompts (# @prompt and # @secret)
+# Interactively prompts for variable values before executing
+# @prompt userName Enter your username
+# @secret userPass Enter your password
+POST {{baseUrl}}/post
+Content-Type: application/json
+
+{
+  "user": "{{userName}}",
+  "pass": "{{userPass}}"
+}
+
+### 19. Pass-through Custom cURL Flags (# @curl-*)
+# @curl-location
+# @curl-connect-timeout 10
+# @curl-insecure
+GET {{baseUrl}}/redirect/2
+Accept: text/html
