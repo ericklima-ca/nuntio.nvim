@@ -1,3 +1,4 @@
+local Assertions = require("nuntio.assertions")
 local JsonPath = require("nuntio.parser.jsonpath")
 local Store = require("nuntio.store")
 local Utils = require("nuntio.utils")
@@ -10,6 +11,11 @@ local M = {}
 ---@return string body Modified body if @jq applied
 function M.process(request, response)
   local final_body = response.body
+
+  -- 0. # @assert <subject> [arg] <op> [value] (before @jq rewrites the body)
+  if request.assertions and #request.assertions > 0 then
+    response.assertions = Assertions.run(request.assertions, response)
+  end
 
   -- 1. # @jq <filter>
   if request.metadata["jq"] and #request.metadata["jq"] > 0 then

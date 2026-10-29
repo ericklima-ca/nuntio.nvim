@@ -153,6 +153,47 @@ Content-Type: application/json
     assert_eq(parsed_inner.user_from_prereq, 99)
   end)
 
+  it("evaluates # @assert directives (with ### Shared asserts) against a live response", function()
+    local text = [[
+@expectedId = 99
+
+### Shared
+# @assert status < 500
+
+### Assert user
+# @assert status == 200
+# @assert header Content-Type contains application/json
+# @assert body $.user_id == {{expectedId}}
+# @assert body $.status == "ok"
+# @assert body $.missing exists
+# @assert duration < 5000
+GET http://127.0.0.1:19877/user
+]]
+    local blocks, doc_vars = Document.parse_document(Utils.split_lines(text))
+    local shared, target
+    for _, b in ipairs(blocks) do
+      if b.is_shared then shared = b else target = b end
+    end
+
+    local done = false
+    local result_resp = nil
+    Runner.run_block(target, doc_vars, 0, vim.uv.cwd(), shared, function(_, resp)
+      done = true
+      result_resp = resp
+    end)
+
+    vim.wait(3000, function() return done end, 50)
+    assert_true(result_resp ~= nil, "response received")
+    local summary = result_resp.assertions
+    assert_not_nil(summary, "assertion summary attached to response")
+    assert_eq(summary.total, 7)
+    assert_eq(summary.passed, 6)
+    assert_eq(summary.failed, 1)
+    assert_eq(summary.results[1].expr, "status < 500", "shared assertion runs first")
+    assert_eq(summary.results[4].expr, "body $.user_id == 99", "variables interpolated")
+    assert_eq(summary.results[6].ok, false, "missing field fails")
+  end)
+
   -- Terminate background server
   pcall(function() srv_job:kill("sigterm") end)
 end)

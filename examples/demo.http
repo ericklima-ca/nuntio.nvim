@@ -25,6 +25,12 @@ User-Agent: nuntio.nvim/1.0
 X-Demo-Suite: active
 
 ### 1. Simple GET Request with Query Parameters
+# Assertions run on the response: see results inline and in the Tests tab (t)
+# @assert status == 200
+# @assert header Content-Type contains application/json
+# @assert body $.args.query == "nuntio"
+# @assert body $.args.filter exists
+# @assert duration < 5000
 GET {{baseUrl}}/get?query=nuntio&filter=all
 Accept: application/json
 

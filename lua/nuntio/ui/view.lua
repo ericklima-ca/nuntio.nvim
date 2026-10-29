@@ -11,6 +11,8 @@ local M = {}
 ---@type integer|nil
 M.bufnr = nil
 
+local tests_ns = vim.api.nvim_create_namespace("nuntio_tests")
+
 ---@type integer|nil
 M.winid = nil
 
@@ -225,6 +227,62 @@ local function format_stats(resp)
   end
 
   return lines
+end
+
+--- Format assertion results panel
+---@param resp NuntioStoredResponse
+---@return string[]
+local function format_tests(resp)
+  local lines = {}
+  table.insert(lines, "┌─────────────────────────────────────────────────────────────────────────────┐")
+  table.insert(lines, "│ 󰙨 ASSERTIONS                                                                │")
+  table.insert(lines, "└─────────────────────────────────────────────────────────────────────────────┘")
+  table.insert(lines, "")
+
+  local summary = resp.assertions
+  if not summary or summary.total == 0 then
+    table.insert(lines, "  No assertions for this request.")
+    table.insert(lines, "  Add one above the request line, e.g.  # @assert status == 200")
+    return lines
+  end
+
+  if summary.failed == 0 then
+    table.insert(lines, string.format("  Result:  ✔ %d/%d passed", summary.passed, summary.total))
+  else
+    table.insert(lines, string.format("  Result:  ✘ %d failed, %d/%d passed", summary.failed, summary.passed, summary.total))
+  end
+  table.insert(lines, "")
+
+  for _, r in ipairs(summary.results) do
+    table.insert(lines, string.format("  %s %s", r.ok and "✔" or "✘", r.expr))
+    if not r.ok then
+      if r.expected then
+        table.insert(lines, string.format("      expected: %s", r.expected))
+      end
+      if r.actual then
+        table.insert(lines, string.format("      actual:   %s", r.actual))
+      end
+      if r.message then
+        table.insert(lines, string.format("      reason:   %s", r.message))
+      end
+    end
+  end
+
+  return lines
+end
+
+--- Highlight ✔ / ✘ markers in the Tests panel
+---@param buf integer
+---@param lines string[]
+local function apply_tests_highlights(buf, lines)
+  for i, line in ipairs(lines) do
+    for _, mark in ipairs({ { "✔", "DiagnosticOk" }, { "✘", "DiagnosticError" } }) do
+      local s, e = line:find(mark[1], 1, true)
+      if s then
+        pcall(vim.api.nvim_buf_set_extmark, buf, tests_ns, i - 1, s - 1, { end_col = e, hl_group = mark[2] })
+      end
+    end
+  end
 end
 
 --- Format the colorful header banner
@@ -479,12 +537,19 @@ local function render_view(resp)
   elseif M.active_view == "verbose" then
     ft = "text"
     content_lines = Utils.split_lines(resp.verbose or "")
+  elseif M.active_view == "tests" then
+    ft = "text"
+    content_lines = format_tests(resp)
   elseif M.active_view == "stats" then
     ft = "text"
     content_lines = format_stats(resp)
   end
 
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, content_lines)
+  vim.api.nvim_buf_clear_namespace(buf, tests_ns, 0, -1)
+  if M.active_view == "tests" then
+    apply_tests_highlights(buf, content_lines)
+  end
   vim.api.nvim_set_option_value("filetype", ft, { buf = buf })
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
@@ -528,6 +593,9 @@ function M.get_available_views(resp)
   local views = { "body", "headers", "headers_body" }
   if resp and ((resp.chain and resp.chain.total and resp.chain.total > 1) or (resp.exported_vars and next(resp.exported_vars) ~= nil)) then
     table.insert(views, "chain")
+  end
+  if resp and resp.assertions and resp.assertions.total > 0 then
+    table.insert(views, "tests")
   end
   table.insert(views, "stats")
   table.insert(views, "verbose")
@@ -634,6 +702,7 @@ function M.setup_keymaps(buf)
   map("h", function() M.switch_view("headers") end)
   map("a", function() M.switch_view("headers_body") end)
   map("c", function() M.switch_view("chain") end)
+  map("t", function() M.switch_view("tests") end)
   map("s", function() M.switch_view("stats") end)
   map("v", function() M.switch_view("verbose") end)
   map("H", function() M.open_history_picker() end)

@@ -19,6 +19,7 @@ local M = {}
 ---@field stats? table Timing statistics
 ---@field verbose? string Curl verbose output
 ---@field timestamp number Unix timestamp
+---@field assertions? NuntioAssertionSummary Results of `# @assert` checks
 
 --- In-memory store
 ---@type NuntioStoredResponse[]
