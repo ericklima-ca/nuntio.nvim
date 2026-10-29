@@ -16,15 +16,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("X-Server", "nuntio-test-server")
         self.end_headers()
-        self.wfile.write(json.dumps({"status": "ok", "user_id": 99, "path": self.path}).encode("utf-8"))
+        self.wfile.write(json.dumps({"status": "ok", "user_id": 99, "path": self.path,
+                                     "cookie": self.headers.get("Cookie")}).encode("utf-8"))
 
     def do_POST(self):
         length = int(self.headers.get("content-length", 0))
         body = self.rfile.read(length).decode("utf-8")
+        try:
+            user = json.loads(body).get("user")
+        except Exception:
+            user = None
         self.send_response(201)
         self.send_header("Content-Type", "application/json")
+        if user:
+            self.send_header("Set-Cookie", "sid=" + user + "; Path=/")
         self.end_headers()
-        self.wfile.write(json.dumps({"created": True, "token": "session_tok_777", "body": body}).encode("utf-8"))
+        self.wfile.write(json.dumps({"created": True, "token": "session_tok_777", "body": body,
+                                     "user": user}).encode("utf-8"))
 
     def log_message(self, format, *args):
         pass
@@ -286,6 +294,130 @@ GET http://127.0.0.1:19877/user
     assert_true(state.report.total >= 3)
     assert_nil(Load.active)
     assert_true(not Load.cancel(), "nothing left to cancel")
+  end)
+
+  --- Start a scenario/mix plan block named `plan_name` from `text` and wait for it
+  local function run_plan(text, plan_index, args)
+    local blocks, doc_vars, plans = Document.parse_document(Utils.split_lines(text))
+    local state, err = Load.start({
+      block = plans[plan_index or 1],
+      blocks = blocks,
+      plans = plans,
+      doc_vars = doc_vars,
+      bufnr = 0,
+      buffer_dir = vim.uv.cwd(),
+      args = args,
+    })
+    if not state then return nil, err end
+    vim.wait(15000, function() return state.finished end, 20)
+    return state
+  end
+
+  local scenario_doc = [[
+### Login
+# @name login
+# @assert status == 201
+POST http://127.0.0.1:19877/login
+Content-Type: application/json
+
+{ "user": "u{{$vu}}-{{$iteration}}" }
+
+### Profile
+# @name profile
+# @assert body $.path == "/profile/u{{$vu}}-{{$iteration}}"
+# @assert body $.cookie == "sid=u{{$vu}}-{{$iteration}}"
+GET http://127.0.0.1:19877/profile/{{login.response.body.$.user}}
+
+### Browse
+# @name browse
+GET http://127.0.0.1:19877/browse
+
+### Scenario: session
+# @scenario session weight=3
+# @steps login -> profile
+# @load iterations=12 concurrency=4
+
+### Scenario: anonymous
+# @scenario anonymous weight=1
+# @steps browse
+# @think 50ms
+
+### Mix
+# @load-mix session anonymous
+# @load iterations=40 concurrency=4
+]]
+
+  it("scenario: chains and cookies stay isolated per virtual user and iteration", function()
+    local state, err = run_plan(scenario_doc, 1)
+    assert_true(state ~= nil, err)
+    local r = state.report
+    assert_eq(r.total, 24, "12 iterations × 2 steps")
+    assert_eq(r.succeeded, 24, vim.inspect(r.assert_errors) .. vim.inspect(r.errors))
+    local steps = {}
+    for _, s in ipairs(r.breakdown.steps) do steps[s.name] = s.report end
+    assert_eq(steps.login.total, 12)
+    assert_eq(steps.profile.total, 12)
+    assert_eq(r.breakdown.scenarios[1].iterations, 12)
+    assert_eq(r.breakdown.scenarios[1].ok, 12)
+    -- Scenario runs must not leak into the global history used by normal chaining
+    assert_true(Store.get_by_name("login") == nil, "login response stayed out of Store")
+  end)
+
+  it("scenario: mix picks scenarios by weight", function()
+    math.randomseed(42) -- weighted picks are random; keep the test deterministic
+    local state, err = run_plan(scenario_doc, 3)
+    assert_true(state ~= nil, err)
+    local by_name = {}
+    for _, sc in ipairs(state.report.breakdown.scenarios) do by_name[sc.name] = sc end
+    assert_eq(by_name.session.iterations + by_name.anonymous.iterations, 40)
+    assert_true(by_name.session.iterations > by_name.anonymous.iterations, "weight 3 beats weight 1")
+    assert_eq(state.report.failed, 0, vim.inspect(state.report.assert_errors))
+  end)
+
+  it("scenario: a failed step ends the iteration and think time is applied", function()
+    local doc = [[
+### Gate
+# @name gate
+# @assert status == 418
+GET http://127.0.0.1:19877/gate
+
+### After
+# @name after
+GET http://127.0.0.1:19877/after
+
+### Scenario: blocked
+# @scenario blocked
+# @steps gate -> after
+# @load iterations=3 concurrency=1
+
+### Scenario: slow
+# @scenario slow
+# @steps after -> after
+# @think 60ms
+# @load iterations=2 concurrency=1
+]]
+    local blocked = run_plan(doc, 1)
+    local steps = {}
+    for _, s in ipairs(blocked.report.breakdown.steps) do steps[s.name] = s.report end
+    assert_eq(steps.gate.total, 3)
+    assert_eq(steps.after.total, 0, "steps after a failure are skipped")
+    assert_eq(blocked.report.breakdown.scenarios[1].ok, 0)
+
+    local slow = run_plan(doc, 2)
+    local d = slow.report.breakdown.scenarios[1].duration
+    assert_true(d.min >= 60, "think time between steps: " .. tostring(d.min))
+    assert_eq(slow.report.total, 4)
+  end)
+
+  it("scenario: refuses unknown steps before sending anything", function()
+    local state, err = run_plan([[
+### Scenario: broken
+# @scenario broken
+# @steps nowhere
+]], 1)
+    assert_nil(state)
+    assert_true(err:find("unknown request 'nowhere'", 1, true) ~= nil, err)
+    assert_nil(Load.active)
   end)
 
   -- Terminate background server

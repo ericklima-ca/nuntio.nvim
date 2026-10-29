@@ -30,7 +30,7 @@ Powered by native `curl`, `tree-sitter-http`, and Neovim's async system API.
   - **Code Actions**: Quick triggers to run requests, copy as cURL, switch environments, and inspect cookies.
   - **Document Formatter (`textDocument/formatting`)**: Format `.http` files with `gq` or `:Nuntio format`—uppercases methods, aligns headers, formats JSON bodies, and safely preserves embedded template variables (`{{vars}}`).
 - **Response Assertions (`# @assert`)**: Turn `.http` files into API tests with checks on status, headers, JSON body fields (JSONPath), and latency. Results appear inline (`✔ 201 (45ms) · 5/5 passed`), in a dedicated **Tests** tab, and in the `:Nuntio run_all` summary. Malformed assertions are flagged by the LSP.
-- **Load Testing (`:Nuntio load`)**: Send N requests (or run for a duration) at a set concurrency, with per-iteration values (`{{$iteration}}`, `{{$vu}}`, CSV/JSON rows via `# @data`) and `# @assert` checks on every response. A live report shows throughput, success rate, status codes, p50–p99 latency and a histogram. The curl backend has hard limits and warns when your machine, not the server, is the bottleneck.
+- **Load Testing (`:Nuntio load`)**: Send N requests (or run for a duration) at a set concurrency, with per-iteration values (`{{$iteration}}`, `{{$vu}}`, CSV/JSON rows via `# @data`) and `# @assert` checks on every response. Scenarios (`# @scenario`, `# @steps`) chain requests like login → cart → checkout per virtual user, with isolated tokens and cookies, think time and weighted mixes (`# @load-mix`). A live report shows throughput, success rate, status codes, p50–p99 latency, a histogram and per-step tables. The curl backend has hard limits and warns when your machine, not the server, is the bottleneck.
 - **Live Response Filter (`F` / JQ / JSONPath)**: Press `F` or `f` in the response window to live-filter large JSON responses in real-time with JQ or JSONPath syntax. Copy the query directly to your clipboard with `<C-y>` for chaining.
 - **Advanced Fuzzy Request Picker (`:Nuntio find` / `<leader>rf`)**:
   - Search requests across the **current buffer** or the entire **workspace** (`**/*.http`).
@@ -418,6 +418,60 @@ GET {{baseUrl}}/products/{{data.sku}}?store={{data.store}}&i={{$iteration}}
 - **Assertions**: `# @assert` lines are checked on every response. A request counts as successful when all assertions pass (or, without assertions, on a 2xx/3xx status).
 - **Report**: a live view in the response window with throughput, success rate, status counts, latency percentiles (from curl's own timings), a histogram, grouped errors and failed assertions. The request line shows progress (`⏳ 213/500`), then a summary (`✔ 59 rps · 500/500 ok · p95 301ms`). In the report: `<C-c>` cancels, `R` reruns, `q` closes.
 - Load runs don't touch response history, chained variables or the cookie jar.
+
+### Scenarios: multi-step flows per virtual user
+
+A scenario is a block without a request line that chains named requests. Run `:Nuntio load` with the cursor on it:
+
+```http
+### Login
+# @name login
+POST {{baseUrl}}/login
+Content-Type: application/json
+
+{ "user": "{{data.user}}", "password": "{{data.password}}" }
+
+### Browse
+# @name browse
+GET {{baseUrl}}/products?store={{data.store}}
+
+### Add to cart
+# @name add_to_cart
+POST {{baseUrl}}/cart
+Authorization: Bearer {{login.response.body.$.token}}
+
+{ "sku": "{{data.sku}}" }
+
+### Checkout
+# @name checkout
+POST {{baseUrl}}/checkout
+Authorization: Bearer {{login.response.body.$.token}}
+
+### Scenario: buyer
+# @scenario buyer weight=30
+# @steps login -> add_to_cart -> checkout
+# @think 200..800ms
+# @load iterations=100 concurrency=10
+# @data ./users.csv mode=unique
+
+### Scenario: window shopper
+# @scenario shopper weight=70
+# @steps login -> browse
+
+### Retail mix
+# @load-mix buyer shopper
+# @load duration=60s concurrency=20
+# @data ./users.csv mode=circular
+```
+
+- **Each iteration runs the whole flow for one virtual user.** Chained values like `{{login.response.body.$.token}}` resolve from that virtual user's own responses in that iteration, never from your response history, so concurrent users never see each other's tokens.
+- **Sessions are isolated**: each iteration starts with a fresh cookie jar for its virtual user, so `Set-Cookie` logins work.
+- **One data row per iteration**, shared by all its steps. `{{$iteration}}` and `{{$vu}}` are the same across the steps of an iteration.
+- **`# @think`** adds a random pause between steps (`500ms`, `1s`, `200..800ms`).
+- **A failed step ends the iteration** (later steps usually depend on it). Each step's `# @assert` lines decide whether it passed.
+- **`# @load-mix`** runs several scenarios together; each iteration picks one by `weight`. Put `# @load` / `# @data` on the mix block.
+- `requests=` and `iterations=` mean the same thing: iterations. The request limit counts iterations × steps.
+- The report adds a per-scenario table (iterations, ok%, iteration p50/p95 including think time) and a per-step table (requests, ok%, latency, req/s).
 
 ### curl backend limits
 

@@ -44,6 +44,7 @@ end
 ---@field progress? string e.g. "213/500"
 ---@field plan string e.g. "500 requests · concurrency 20"
 ---@field data? string e.g. "products.csv (random, 120 rows)"
+--- (report.breakdown, when present, adds per-scenario and per-step tables)
 
 --- Render a load report into display lines
 ---@param report NuntioLoadReport
@@ -84,6 +85,25 @@ function M.format(report, meta)
   end
   add("  Status       " .. table.concat(status_parts, "   "))
   add("")
+
+  if report.breakdown then
+    add("  Scenario           weight   iters      ok%   iter p50   iter p95")
+    for _, sc in ipairs(report.breakdown.scenarios) do
+      local d = sc.duration
+      add(string.format("  %-18s %6d %7d %7.1f%% %10s %10s", sc.name, sc.weight, sc.iterations,
+        sc.iterations > 0 and sc.ok / sc.iterations * 100 or 0,
+        d and fmt_secs(d.p50) or "-", d and fmt_secs(d.p95) or "-"))
+    end
+    add("")
+    add("  Step                 reqs      ok%     p50     p95     p99      rps")
+    for _, step in ipairs(report.breakdown.steps) do
+      local r, l = step.report, step.report.latency
+      add(string.format("  %-18s %6d %7.1f%% %7s %7s %7s %8.1f", step.name, r.total, r.success_rate,
+        l and string.format("%.0f", l.p50) or "-", l and string.format("%.0f", l.p95) or "-",
+        l and string.format("%.0f", l.p99) or "-", r.rps))
+    end
+    add("")
+  end
 
   if report.latency then
     add("  Latency (ms)     min     p50     p90     p95     p99     max")

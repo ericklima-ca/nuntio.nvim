@@ -89,6 +89,8 @@ function M.rerun()
   end
   M.start({
     block = last.block,
+    blocks = last.blocks,
+    plans = last.plans,
     doc_vars = last.doc_vars,
     bufnr = last.bufnr,
     buffer_dir = last.buffer_dir,

@@ -29,11 +29,11 @@ end
 
 --- Parse current buffer into blocks and shared block
 ---@param bufnr? integer
----@return NuntioBlock[] blocks, table<string, string> doc_vars, NuntioBlock|nil shared_block
+---@return NuntioBlock[] blocks, table<string, string> doc_vars, NuntioBlock|nil shared_block, NuntioBlock[] plans
 local function parse_current(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local lines = get_buffer_lines(bufnr)
-  local blocks, doc_vars = Document.parse_document(lines)
+  local blocks, doc_vars, plans = Document.parse_document(lines)
 
   local shared_block = nil
   local runnable_blocks = {}
@@ -46,7 +46,20 @@ local function parse_current(bufnr)
     end
   end
 
-  return runnable_blocks, doc_vars, shared_block
+  return runnable_blocks, doc_vars, shared_block, plans
+end
+
+--- Load plan block (`# @scenario` / `# @load-mix`) containing a line, if any
+---@param plans NuntioBlock[]
+---@param lnum integer
+---@return NuntioBlock|nil
+local function plan_at_line(plans, lnum)
+  for _, p in ipairs(plans) do
+    if lnum >= p.start_line and lnum <= p.end_line then
+      return p
+    end
+  end
+  return nil
 end
 
 --- Run request at cursor or visual selection
@@ -84,7 +97,12 @@ function M.run()
 
   -- Normal mode: run request at cursor
   local lnum = vim.api.nvim_win_get_cursor(0)[1]
-  local blocks, doc_vars, shared_block = parse_current(bufnr)
+  local blocks, doc_vars, shared_block, plans = parse_current(bufnr)
+
+  if plan_at_line(plans, lnum) then
+    vim.notify("nuntio: this is a load scenario block; run it with :Nuntio load", vim.log.levels.INFO)
+    return
+  end
 
   local target_block = Document.get_block_at_line(blocks, lnum)
   if not target_block then
@@ -211,8 +229,8 @@ function M.load(...)
   if not buffer_dir or buffer_dir == "" then buffer_dir = vim.uv.cwd() end
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1]
-  local blocks, doc_vars, shared_block = parse_current(bufnr)
-  local block = Document.get_block_at_line(blocks, lnum)
+  local blocks, doc_vars, shared_block, plans = parse_current(bufnr)
+  local block = plan_at_line(plans, lnum) or Document.get_block_at_line(blocks, lnum)
   if not block then
     vim.notify("nuntio: no request found at cursor", vim.log.levels.WARN)
     return
@@ -220,6 +238,8 @@ function M.load(...)
 
   require("nuntio.ui.load_view").start({
     block = block,
+    blocks = blocks,
+    plans = plans,
     doc_vars = doc_vars,
     bufnr = bufnr,
     buffer_dir = buffer_dir,
