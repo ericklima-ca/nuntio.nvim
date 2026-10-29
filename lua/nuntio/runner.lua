@@ -35,7 +35,7 @@ local function handle_prompts(block)
         prompt_text = (prompt_text ~= "") and prompt_text or ("Enter secret " .. var_name .. ": ")
         local val = vim.fn.inputsecret(prompt_text)
         if val and val ~= "" then
-          Store.set_global(var_name, val)
+          Store.set_secret(var_name, val)
         end
       end
     end

@@ -203,6 +203,29 @@ GET http://127.0.0.1:19877/user
     assert_eq(summary.results[6].ok, false, "missing field fails")
   end)
 
+  it("uses # @secret values in the request without writing them to disk", function()
+    local original = vim.fn.inputsecret
+    vim.fn.inputsecret = function() return "e2e-s3cr3t-value" end
+    local blocks, doc_vars = Document.parse_document(Utils.split_lines([[
+# @secret e2e_api_pass Enter password
+GET http://127.0.0.1:19877/secure?pw={{e2e_api_pass}}
+]]))
+    local done, result_resp = false, nil
+    local ok, err = pcall(Runner.run_block, blocks[1], doc_vars, 0, vim.uv.cwd(), nil, function(_, resp)
+      done = true
+      result_resp = resp
+    end)
+    vim.fn.inputsecret = original
+    assert_true(ok, tostring(err))
+
+    vim.wait(3000, function() return done end, 50)
+    assert_true(result_resp ~= nil, "response received")
+    assert_eq(result_resp.json.path, "/secure?pw=e2e-s3cr3t-value", "secret reached the request")
+    local disk = Utils.read_file(vim.fs.joinpath(vim.fn.stdpath("data"), "nuntio_globals.json")) or ""
+    assert_true(not disk:find("e2e-s3cr3t-value", 1, true), "secret not persisted")
+    Store.clear_global("e2e_api_pass")
+  end)
+
   --- Start a load test for the first request in `text` and wait for it to finish
   local function run_load(text, buffer_dir, args)
     local blocks, doc_vars = Document.parse_document(Utils.split_lines(text))
