@@ -65,6 +65,7 @@ _G.assert_not_nil = assert_not_nil
 local test_files = {
   "tests/spec/document_spec.lua",
   "tests/spec/jsonpath_spec.lua",
+  "tests/spec/assertions_spec.lua",
   "tests/spec/vars_spec.lua",
   "tests/spec/env_spec.lua",
   "tests/spec/curl_spec.lua",

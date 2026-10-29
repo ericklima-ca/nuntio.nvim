@@ -26,15 +26,18 @@ end
 ---@param line_nr integer 1-based line number
 ---@param status number HTTP status code
 ---@param duration_ms number Duration in milliseconds
-function M.set_done(bufnr, line_nr, status, duration_ms)
+---@param assertions? NuntioAssertionSummary
+function M.set_done(bufnr, line_nr, status, duration_ms, assertions)
   if not Config.get().inlay_icons or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   pcall(vim.api.nvim_buf_clear_namespace, bufnr, ns_id, line_nr - 1, line_nr)
 
+  local has_assertions = assertions and assertions.total > 0
   local icon = Config.get().icons.done or "✔"
   local hl = "String"
-  if status >= 400 then
+  -- With assertions, they decide pass/fail rather than the status code
+  if (has_assertions and assertions.failed > 0) or (not has_assertions and status >= 400) then
     icon = Config.get().icons.error or "✘"
     hl = "ErrorMsg"
   end
@@ -47,6 +50,9 @@ function M.set_done(bufnr, line_nr, status, duration_ms)
   end
 
   local label = string.format(" %s %d (%s)", icon, status, time_str)
+  if has_assertions then
+    label = label .. string.format(" · %d/%d passed", assertions.passed, assertions.total)
+  end
   pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, line_nr - 1, 0, {
     virt_text = { { label, hl } },
     virt_text_pos = "eol",

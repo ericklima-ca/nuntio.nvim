@@ -5,7 +5,7 @@ local M = {}
 ---@field split_direction? "right"|"below"|"left"|"above"
 ---@field width? number Float width fraction (0-1) or column count
 ---@field height? number Float height fraction (0-1) or line count
----@field default_view? "body"|"headers"|"headers_body"|"verbose"|"stats"
+---@field default_view? "body"|"headers"|"headers_body"|"verbose"|"stats"|"tests"
 ---@field winbar? boolean
 ---@field max_response_size? number Max bytes to display before truncating
 ---@field picker? "auto"|"telescope"|"snacks"|"fzf_lua"|"builtin"|"ui_select"

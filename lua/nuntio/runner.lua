@@ -179,9 +179,6 @@ function M.run_block(block, doc_vars, bufnr, buffer_dir, shared_block, on_comple
       return
     end
 
-    -- Update inlay with status & duration
-    Inlay.set_done(bufnr, resolved.icon_line, raw_res.status, raw_res.duration_ms)
-
     -- Build StoredResponse
     local decoded_json = nil
     if raw_res.body and raw_res.body ~= "" then
@@ -321,8 +318,11 @@ function M.run_block(block, doc_vars, bufnr, buffer_dir, shared_block, on_comple
       end
     end
 
-    -- Run metadata post-processors (@jq, @env-json-key, redirect >>)
+    -- Run metadata post-processors (@assert, @jq, @env-json-key, redirect >>)
     Processors.process(resolved, stored)
+
+    -- Update inlay with status, duration & assertion summary
+    Inlay.set_done(bufnr, resolved.icon_line, raw_res.status, raw_res.duration_ms, stored.assertions)
 
     -- Save in store
     Store.add_response(stored, {
@@ -357,14 +357,28 @@ function M.run_queue(queue, doc_vars, bufnr, buffer_dir, shared_block, on_finish
       if #results > 1 then
         local succeeded = 0
         local total_time = 0
+        local assert_total, assert_passed = 0, 0
         for _, r in ipairs(results) do
-          if r.ok and r.status >= 200 and r.status < 400 then
+          -- Requests with assertions are judged by them (e.g. `status == 404`)
+          local passed
+          if r.assertions then
+            assert_total = assert_total + r.assertions.total
+            assert_passed = assert_passed + r.assertions.passed
+            passed = r.ok and r.assertions.failed == 0
+          else
+            passed = r.ok and r.status >= 200 and r.status < 400
+          end
+          if passed then
             succeeded = succeeded + 1
           end
           total_time = total_time + r.time
         end
         local level = (succeeded == #results) and vim.log.levels.INFO or vim.log.levels.WARN
-        vim.notify(string.format("nuntio batch: %d/%d requests completed successfully (%dms total)", succeeded, #results, total_time), level)
+        local msg = string.format("nuntio batch: %d/%d requests completed successfully (%dms total)", succeeded, #results, total_time)
+        if assert_total > 0 then
+          msg = msg .. string.format(" · assertions: %d/%d passed", assert_passed, assert_total)
+        end
+        vim.notify(msg, level)
       end
       if on_finished then on_finished(results) end
       return
@@ -380,6 +394,7 @@ function M.run_queue(queue, doc_vars, bufnr, buffer_dir, shared_block, on_finish
         status = resp and resp.status or 0,
         time = resp and resp.time or 0,
         ok = success,
+        assertions = resp and resp.assertions,
       })
 
       if not success then

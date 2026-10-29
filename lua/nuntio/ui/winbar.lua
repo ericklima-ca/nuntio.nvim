@@ -7,6 +7,7 @@ M.panes = {
   { id = "headers", label = "Headers", icon = "󰒚", click = "v:lua.NuntioWinbarClick_headers" },
   { id = "headers_body", label = "All", icon = "󱂛", click = "v:lua.NuntioWinbarClick_overview" },
   { id = "chain", label = "Chain", icon = "󰌷", click = "v:lua.NuntioWinbarClick_chain", req_chain = true },
+  { id = "tests", label = "Tests", icon = "󰙨", click = "v:lua.NuntioWinbarClick_tests", req_tests = true },
   { id = "stats", label = "Stats", icon = "󰄬", click = "v:lua.NuntioWinbarClick_stats" },
   { id = "verbose", label = "Raw", icon = "󰆼", click = "v:lua.NuntioWinbarClick_raw" },
 }
@@ -16,6 +17,7 @@ _G.NuntioWinbarClick_body = function() require("nuntio.ui.view").switch_view("bo
 _G.NuntioWinbarClick_headers = function() require("nuntio.ui.view").switch_view("headers") end
 _G.NuntioWinbarClick_overview = function() require("nuntio.ui.view").switch_view("headers_body") end
 _G.NuntioWinbarClick_chain = function() require("nuntio.ui.view").switch_view("chain") end
+_G.NuntioWinbarClick_tests = function() require("nuntio.ui.view").switch_view("tests") end
 _G.NuntioWinbarClick_stats = function() require("nuntio.ui.view").switch_view("stats") end
 _G.NuntioWinbarClick_raw = function() require("nuntio.ui.view").switch_view("verbose") end
 _G.NuntioWinbarClick_history = function() require("nuntio.ui.view").open_history_picker() end
@@ -31,9 +33,11 @@ function M.render(active_id, resp)
   local has_chain = (resp and resp.chain and resp.chain.total and resp.chain.total > 1)
   local has_exports = (resp and resp.exported_vars and next(resp.exported_vars) ~= nil)
   local show_chain_tab = has_chain or has_exports
+  local tests = resp and resp.assertions
+  local has_tests = tests ~= nil and tests.total > 0
 
   for _, p in ipairs(M.panes) do
-    if not p.req_chain or show_chain_tab then
+    if (not p.req_chain or show_chain_tab) and (not p.req_tests or has_tests) then
       local is_active = (p.id == active_id)
       local click_prefix = "%@" .. p.click .. "@"
       local click_suffix = "%X"
@@ -70,6 +74,12 @@ function M.render(active_id, resp)
     table.insert(parts, string.format("%%#%s#%s %d%%* ", status_hl, status_sym, resp.status))
     table.insert(parts, string.format("%%#%s#⏱ %.0fms%%* ", lat_hl, resp.time or 0))
     table.insert(parts, string.format("%%#Comment#📦 %s%%* ", size_str))
+
+    if has_tests then
+      local tests_hl = tests.failed > 0 and "DiagnosticError" or "DiagnosticOk"
+      local tests_sym = tests.failed > 0 and "✘" or "✔"
+      table.insert(parts, string.format("%%#%s#󰙨 %s %d/%d%%* ", tests_hl, tests_sym, tests.passed, tests.total))
+    end
 
     if has_chain then
       table.insert(parts, string.format("%%#NuntioBadgePurple#󰌷 %d/%d%%* ", resp.chain.step or 1, resp.chain.total))

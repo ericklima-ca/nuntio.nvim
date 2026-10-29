@@ -29,6 +29,7 @@ Powered by native `curl`, `tree-sitter-http`, and Neovim's async system API.
   - **Document Symbols & Outline**: Outlines all request blocks and document variables natively in Telescope, Snacks, and aerial.
   - **Code Actions**: Quick triggers to run requests, copy as cURL, switch environments, and inspect cookies.
   - **Document Formatter (`textDocument/formatting`)**: Format `.http` files with `gq` or `:Nuntio format`—uppercases methods, aligns headers, formats JSON bodies, and safely preserves embedded template variables (`{{vars}}`).
+- **Response Assertions (`# @assert`)**: Turn `.http` files into API tests with checks on status, headers, JSON body fields (JSONPath), and latency. Results appear inline (`✔ 201 (45ms) · 5/5 passed`), in a dedicated **Tests** tab, and in the `:Nuntio run_all` summary. Malformed assertions are flagged by the LSP.
 - **Live Response Filter (`F` / JQ / JSONPath)**: Press `F` or `f` in the response window to live-filter large JSON responses in real-time with JQ or JSONPath syntax. Copy the query directly to your clipboard with `<C-y>` for chaining.
 - **Advanced Fuzzy Request Picker (`:Nuntio find` / `<leader>rf`)**:
   - Search requests across the **current buffer** or the entire **workspace** (`**/*.http`).
@@ -266,6 +267,7 @@ Inside the response view buffer:
 - `h` / `H`: Jump directly to **Headers**
 - `a` / `A`: Jump directly to **All** (Headers + Body)
 - `c` / `C`: Jump directly to **Chain** (Execution timeline & variable flow)
+- `t`: Jump directly to **Tests** (`# @assert` results with expected vs actual values)
 - `s` / `S`: Jump directly to **Stats** (Detailed latency & transfer breakdown)
 - `v` / `V`: Jump directly to **Raw** (Raw cURL trace)
 - `F` / `f`: Open interactive **Live Filter** (JQ / JSONPath)
@@ -348,6 +350,41 @@ Pass low-level curl flags directly on any request block:
 # @no-cookie-jar
 GET https://self-signed.local/data
 ```
+
+### 6. Response Assertions (`# @assert`)
+
+Declare checks above the request line. They run when the response arrives:
+
+```http
+### Create user
+# @assert status == 201
+# @assert header Content-Type contains application/json
+# @assert body $.id exists
+# @assert body $.name == "{{userName}}"
+# @assert body $.tags contains admin
+# @assert duration < 500
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{ "name": "{{userName}}", "tags": ["admin"] }
+```
+
+Syntax: `# @assert <subject> [arg] <operator> [value]`
+
+| Subject | Argument | Actual value |
+|---|---|---|
+| `status` | — | HTTP status code |
+| `header` | header name (case-insensitive) | header value |
+| `body` | optional JSONPath (`$.items[0].id`) | JSON field, or the raw body when omitted |
+| `duration` | — | total request time in ms |
+
+Operators: `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `!contains`, `matches` (Lua pattern), `exists`, `!exists`.
+
+- Values are typed: `42`, `true`, `null`, `"quoted text"` or bare text. `{{variables}}` are interpolated.
+- `contains` checks substrings, or membership when the value is a JSON array.
+- Assertions under `### Shared` apply to every request in the file (e.g. `# @assert status < 500`).
+- When a request has assertions, they decide pass/fail instead of the status code, so `# @assert status == 404` makes a 404 a passing test.
+- Assertions see the original response, before any `# @jq` transformation.
 
 ---
 

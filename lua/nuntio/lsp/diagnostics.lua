@@ -1,3 +1,4 @@
+local Assertions = require("nuntio.assertions")
 local Document = require("nuntio.parser.document")
 local Env = require("nuntio.env")
 
@@ -62,6 +63,24 @@ function M.check(bufnr)
 
   for lnum, line in ipairs(lines) do
     local l_idx = lnum - 1 -- 0-based for LSP diagnostics
+
+    -- 0. Validate `# @assert` syntax (comment lines are skipped below)
+    local assert_col, assert_expr = line:match("^%s*#%s*@assert()(.*)$")
+    if assert_col and (assert_expr == "" or assert_expr:match("^%s")) then
+      local _, err = Assertions.parse(assert_expr)
+      if err then
+        table.insert(diagnostics, {
+          bufnr = bufnr,
+          lnum = l_idx,
+          end_lnum = l_idx,
+          col = assert_col - 1,
+          end_col = #line,
+          severity = vim.diagnostic.severity.ERROR,
+          source = "nuntio",
+          message = "Invalid @assert: " .. err,
+        })
+      end
+    end
 
     -- Skip comment lines (lines starting with # or //)
     if not (line:match("^%s*#") or line:match("^%s*//")) then

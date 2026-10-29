@@ -281,6 +281,12 @@ M.directives = {
     doc = "# @secret <variable> [prompt_message]\n\nPrompts the user interactively with a masked password input before running the request. Never stored on disk.",
   },
   {
+    name = "@assert",
+    insert_text = "@assert ",
+    detail = "Assert on the response",
+    doc = "# @assert <subject> [arg] <operator> [value]\n\nChecks the response after it arrives. Results appear inline, in the **Tests** tab, and in the `run_all` summary.\n\n*Subjects*: `status`, `header <Name>`, `body [jsonpath]`, `duration` (ms)\n\n*Operators*: `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `!contains`, `matches` (Lua pattern), `exists`, `!exists`\n\n*Examples*:\n```http\n# @assert status == 201\n# @assert header Content-Type contains json\n# @assert body $.id exists\n# @assert body $.name == \"Amorim\"\n# @assert duration < 500\n```",
+  },
+  {
     name = "@jq",
     insert_text = "@jq ",
     detail = "Transform response body with jq",

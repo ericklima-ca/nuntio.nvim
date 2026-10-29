@@ -15,6 +15,7 @@ CONTENTS                                                     *nuntio-contents*
   10. Live Response Filter (JQ / JSONPath) .................. |nuntio-filter|
   11. Advanced Fuzzy Request Picker ......................... |nuntio-picker|
   12. Health Check .......................................... |nuntio-health|
+  13. Response Assertions ................................... |nuntio-assertions|
 
 ==============================================================================
 1. OVERVIEW                                                  *nuntio-overview*
@@ -96,6 +97,7 @@ Inside the response view buffer:
   h / H        Switch to Headers
   a / A        Switch to All (Headers + Body)
   c / C        Switch to Chain (execution timeline & variable flow)
+  t            Switch to Tests (`# @assert` results)
   s / S        Switch to Stats (detailed latency & size breakdown)
   v / V        Switch to Raw cURL trace
   F / f        Open interactive Live Filter (JQ / JSONPath)
@@ -307,5 +309,48 @@ KEY CAPABILITIES:
 
 Run `:checkhealth nuntio` to verify system requirements (curl, jq, and
 tree-sitter http grammar).
+
+==============================================================================
+13. RESPONSE ASSERTIONS                                   *nuntio-assertions*
+
+Declare checks with `# @assert` above the request line:
+>http
+    ### Create user
+    # @assert status == 201
+    # @assert header Content-Type contains application/json
+    # @assert body $.id exists
+    # @assert body $.name == "{{userName}}"
+    # @assert duration < 500
+    POST {{baseUrl}}/users
+<
+Syntax: `# @assert <subject> [arg] <operator> [value]`
+
+SUBJECTS:
+  status              HTTP status code
+  header <Name>       Response header value (case-insensitive name)
+  body [jsonpath]     JSON field via JSONPath, or the raw body if omitted
+  duration            Total request time in milliseconds
+
+OPERATORS:
+  ==  !=              Equality (numbers compare numerically)
+  >  <  >=  <=        Numeric comparison
+  contains !contains  Substring, or membership for JSON arrays
+  matches             Lua pattern match
+  exists !exists      Presence check (a JSON `null` field exists)
+
+VALUES are typed: `42`, `true`, `false`, `null`, `"quoted text"`, or bare
+text. `{{variables}}` are interpolated before evaluation.
+
+RESULTS:
+- Inline on the request line: `✔ 201 (45ms) · 5/5 passed`.
+- The Tests tab (`t`) lists each assertion with expected and actual values.
+- `:Nuntio run_all` reports `assertions: N/M passed` in its summary.
+
+NOTES:
+- Assertions under `### Shared` apply to every request in the file.
+- When a request has assertions, they decide pass/fail instead of the
+  status code, so `# @assert status == 404` makes a 404 a passing test.
+- Assertions run on the original response, before `# @jq` transforms it.
+- The LSP reports malformed assertions as diagnostics.
 
 vim:tw=78:ts=8:ft=help:norl:

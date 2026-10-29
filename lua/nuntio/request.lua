@@ -12,6 +12,7 @@ local M = {}
 ---@field headers table<string, string>
 ---@field body string
 ---@field metadata table<string, string[]>
+---@field assertions string[] Interpolated `# @assert` expressions (shared block first)
 ---@field redirect? { file: string, overwrite: boolean }
 ---@field icon_line integer
 ---@field start_line integer
@@ -181,6 +182,18 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
     end
   end
 
+  -- Interpolate assertions: ### Shared asserts apply to every request
+  local assertions = {}
+  local assert_sources = {
+    shared_block and shared_block.metadata and shared_block.metadata["assert"] or {},
+    block.metadata and block.metadata["assert"] or {},
+  }
+  for _, list in ipairs(assert_sources) do
+    for _, expr in ipairs(list) do
+      table.insert(assertions, Vars.interpolate(expr, merged_vars, env_vars))
+    end
+  end
+
   return {
     name = block.name,
     method = block.method:upper(),
@@ -189,6 +202,7 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
     headers = resolved_headers,
     body = resolved_body,
     metadata = block.metadata or {},
+    assertions = assertions,
     redirect = block.redirect,
     icon_line = block.icon_line,
     start_line = block.start_line,
