@@ -43,7 +43,24 @@ function M.check()
     vim.health.warn("Tree-sitter 'http' grammar parser not found. Run ':TSInstall http' to enable full highlighting.")
   end
 
-  -- 5. In-process LSP Server check
+  -- 5. Load testing backends
+  local limits = Config.get().load.curl
+  vim.health.info(string.format(
+    "Load tests use the curl backend: one process per request, limits concurrency=%d, requests=%d, duration=%ds (opts.load.curl)",
+    limits.max_concurrency, limits.max_requests, limits.max_duration))
+  local tools = {}
+  for _, tool in ipairs({ "oha", "vegeta", "k6" }) do
+    if vim.fn.executable(tool) == 1 then
+      table.insert(tools, tool)
+    end
+  end
+  if #tools > 0 then
+    vim.health.ok("Dedicated load tools available for high-throughput tests: " .. table.concat(tools, ", "))
+  else
+    vim.health.info("No dedicated load tool found (oha, vegeta, k6). Install one for tests beyond a few hundred req/s.")
+  end
+
+  -- 6. In-process LSP Server check
   local lsp_cfg = Config.get().lsp or {}
   if lsp_cfg.enable ~= false then
     local active_clients = vim.lsp.get_clients({ name = "nuntio-lsp" })

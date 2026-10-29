@@ -19,6 +19,12 @@ local M = {}
 ---@field end_line integer
 ---@field buffer_dir string
 ---@field raw_block NuntioBlock
+---@field timeout? number Per-request timeout override in milliseconds
+
+---@class NuntioResolveOpts
+---@field env? { vars: table, default_headers: table } Pre-resolved environment (skips Env.resolve)
+---@field extra_env? table Extra variables layered over the environment, e.g. { data = row }
+---@field dynamic? table<string, fun():any> Extra dynamic variables, e.g. ["$iteration"]
 
 --- Resolve an NuntioBlock into a ready-to-execute request
 ---@param block NuntioBlock
@@ -26,9 +32,20 @@ local M = {}
 ---@param buffer_dir string
 ---@param bufnr? integer
 ---@param shared_block? NuntioBlock
+---@param opts? NuntioResolveOpts
 ---@return NuntioResolvedRequest
-function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
-  local env_vars, default_headers = Env.resolve(buffer_dir, bufnr)
+function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block, opts)
+  opts = opts or {}
+  local env_vars, default_headers
+  if opts.env then
+    env_vars, default_headers = opts.env.vars, opts.env.default_headers
+  else
+    env_vars, default_headers = Env.resolve(buffer_dir, bufnr)
+  end
+  if opts.extra_env then
+    env_vars = setmetatable(vim.deepcopy(opts.extra_env), { __index = env_vars })
+  end
+  local dynamic = opts.dynamic
 
   -- Merge variables: doc_vars -> shared_vars -> block_vars
   local merged_vars = {}
@@ -45,7 +62,7 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
   end
 
   -- Interpolate URL
-  local resolved_url = Vars.interpolate(block.url, merged_vars, env_vars)
+  local resolved_url = Vars.interpolate(block.url, merged_vars, env_vars, dynamic)
   -- Escape unencoded spaces in URL for curl compatibility
   resolved_url = resolved_url:gsub(" ", "%%20")
 
@@ -74,8 +91,8 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
   -- Interpolate headers
   local resolved_headers = {}
   for k, v in pairs(raw_headers) do
-    local hk = Vars.interpolate(k, merged_vars, env_vars)
-    local hv = Vars.interpolate(v, merged_vars, env_vars)
+    local hk = Vars.interpolate(k, merged_vars, env_vars, dynamic)
+    local hv = Vars.interpolate(v, merged_vars, env_vars, dynamic)
     resolved_headers[hk] = hv
   end
 
@@ -100,7 +117,7 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
         body_text = file_content
         is_binary_file = true
       else
-        body_text = Vars.interpolate(file_content, merged_vars, env_vars)
+        body_text = Vars.interpolate(file_content, merged_vars, env_vars, dynamic)
       end
     else
       vim.notify("nuntio: could not read body file: " .. target_path, vim.log.levels.WARN)
@@ -143,7 +160,7 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
           local inc_content = Utils.read_file(full_inc)
           if inc_content then
             if is_raw_inc ~= "@" then
-              inc_content = Vars.interpolate(inc_content, merged_vars, env_vars)
+              inc_content = Vars.interpolate(inc_content, merged_vars, env_vars, dynamic)
             end
             table.insert(new_lines, inc_content)
           else
@@ -157,7 +174,7 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
     end
 
     if not is_binary_file then
-      body_text = Vars.interpolate(body_text, merged_vars, env_vars)
+      body_text = Vars.interpolate(body_text, merged_vars, env_vars, dynamic)
     end
   end
 
@@ -190,7 +207,7 @@ function M.resolve(block, doc_vars, buffer_dir, bufnr, shared_block)
   }
   for _, list in ipairs(assert_sources) do
     for _, expr in ipairs(list) do
-      table.insert(assertions, Vars.interpolate(expr, merged_vars, env_vars))
+      table.insert(assertions, Vars.interpolate(expr, merged_vars, env_vars, dynamic))
     end
   end
 

@@ -314,7 +314,7 @@ function M.execute(request, on_complete)
 
   local job = vim.system(args, {
     text = false, -- Capture binary safely
-    timeout = cfg.timeout or 60000,
+    timeout = request.timeout or cfg.timeout or 60000,
   }, function(completed)
     M.active_jobs[current_id] = nil
     local duration_ms = (vim.uv.hrtime() - start_time) / 1e6
@@ -348,6 +348,10 @@ function M.execute(request, on_complete)
 
       if completed.code ~= 0 and status == 0 then
         local err_msg = completed.stderr or string.format("curl exited with code %d", completed.code)
+        -- vim.system signals its own timeout with exit code 124
+        if completed.code == 124 then
+          err_msg = string.format("request timed out after %dms", request.timeout or cfg.timeout or 60000)
+        end
         on_complete(nil, err_msg)
         return
       end
@@ -372,6 +376,16 @@ function M.execute(request, on_complete)
 
   M.active_jobs[current_id] = job
   return current_id
+end
+
+--- Cancel a single active job
+---@param id integer Job id returned by M.execute
+function M.cancel(id)
+  local job = M.active_jobs[id]
+  if job then
+    pcall(function() job:kill("sigterm") end)
+    M.active_jobs[id] = nil
+  end
 end
 
 --- Cancel all active jobs

@@ -16,6 +16,7 @@ CONTENTS                                                     *nuntio-contents*
   11. Advanced Fuzzy Request Picker ......................... |nuntio-picker|
   12. Health Check .......................................... |nuntio-health|
   13. Response Assertions ................................... |nuntio-assertions|
+  14. Load Testing .......................................... |nuntio-load|
 
 ==============================================================================
 1. OVERVIEW                                                  *nuntio-overview*
@@ -86,6 +87,8 @@ COMMANDS                                                *nuntio-commands-list*
 :Nuntio close          Close response view window
 :Nuntio clear_history  Clear stored response history
 :Nuntio lsp_restart    Restart in-process language server sessions
+:Nuntio load [opts]    Load test request at cursor (see |nuntio-load|)
+:Nuntio cancel         Cancel a running load test, keeping partial results
 
 RESPONSE WINDOW KEYMAPS                                      *nuntio-keymaps*
 
@@ -352,5 +355,62 @@ NOTES:
   status code, so `# @assert status == 404` makes a 404 a passing test.
 - Assertions run on the original response, before `# @jq` transforms it.
 - The LSP reports malformed assertions as diagnostics.
+
+==============================================================================
+14. LOAD TESTING                                                *nuntio-load*
+
+`:Nuntio load [requests=N] [concurrency=C] [duration=30s] [timeout=ms]`
+sends the request at cursor many times with C requests in flight at once.
+Settings can also live on the request; arguments override them:
+>http
+    ### Search under load
+    # @load requests=500 concurrency=20
+    # @data ./products.csv mode=random
+    # @assert status == 200
+    GET {{baseUrl}}/products/{{data.sku}}?i={{$iteration}}&vu={{$vu}}
+<
+OPTIONS:
+  requests (n)      Total requests (default 100 when no duration is set)
+  concurrency (c)   Requests in flight at once (default 10)
+  duration (d)      Run time: `30s`, `2m`, `500ms` (plain numbers = seconds)
+  timeout           Per-request timeout in ms (or `5s`)
+When both requests and duration are set, the first limit reached stops it.
+
+PER-ITERATION VALUES:
+The request is resolved again for every iteration, so dynamic variables
+change each time. Extra variables during load tests:
+  {{$iteration}}     Global iteration number (1..N)
+  {{$vu}}            Virtual user id (1..concurrency)
+  {{$vuIteration}}   Requests sent so far by this virtual user (1..)
+
+DATA FILES:                                                *nuntio-load-data*
+`# @data <file> [mode=...]` feeds one row per iteration from a CSV file
+(header row) or a JSON array of objects. Columns: `{{data.<column>}}`.
+  circular     In order, wrapping around (default)
+  sequential   In order; the test stops when rows run out
+  random       Random rows, with repeats
+  unique       Random order, each row once; stops when rows run out
+
+SUCCESS:
+A request succeeds when all its `# @assert` lines pass, or, without
+assertions, when the status is 2xx/3xx.
+
+REPORT:
+A live report opens in the response window: throughput, success rate,
+status counts, latency percentiles (from curl's timings), a histogram,
+grouped errors and failed assertions. The request line shows progress,
+then a summary. Keys in the report: `<C-c>` cancel, `R` rerun, `q` close.
+Load runs never touch response history, chained variables or cookies.
+
+LIMITS:                                                  *nuntio-load-limits*
+Each request spawns one curl process, which caps throughput at a few hundred
+requests per second. Runs above these limits are refused:
+  load.curl.max_concurrency   50
+  load.curl.max_requests      5000
+  load.curl.max_duration      300 (seconds)
+When more than `load.client_bound_threshold` (30%) of request time is local
+overhead, the report warns that the run is client-bound: throughput then
+measures your machine, not the server. Use a dedicated tool such as oha,
+vegeta or k6 for high load.
 
 vim:tw=78:ts=8:ft=help:norl:

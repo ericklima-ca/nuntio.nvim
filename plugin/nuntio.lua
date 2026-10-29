@@ -29,6 +29,8 @@ local subcommands = {
   format = function() require("nuntio").format() end,
   clear_history = function() require("nuntio").clear_history() end,
   lsp_restart = function() require("nuntio.lsp").restart() end,
+  load = function(...) require("nuntio").load(...) end,
+  cancel = function() require("nuntio").cancel() end,
 }
 
 vim.api.nvim_create_user_command("Nuntio", function(opts)
@@ -51,6 +53,8 @@ end, {
       return vim.tbl_keys(subcommands)
     elseif words[2] == "find" then
       return { "buffer", "workspace" }
+    elseif words[2] == "load" then
+      return { "requests=", "concurrency=", "duration=", "timeout=" }
     end
     return {}
   end,

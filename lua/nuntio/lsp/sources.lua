@@ -246,6 +246,24 @@ M.dynamic_vars = {
     detail = "Dynamic random integer",
     doc = "**{{$randomInt [min] [max]}}**\n\nGenerates a random integer. Defaults to 0..1000, or accepts custom bounds.\n\n*Example*: `{{$randomInt 100 999}}` -> `482`",
   },
+  {
+    name = "$iteration",
+    insert_text = "$iteration",
+    detail = "Load test iteration number",
+    doc = "**{{$iteration}}**\n\nGlobal iteration counter (1..N) during `:Nuntio load`. Unresolved outside load tests.",
+  },
+  {
+    name = "$vu",
+    insert_text = "$vu",
+    detail = "Load test virtual user id",
+    doc = "**{{$vu}}**\n\nId of the virtual user (1..concurrency) sending the request during `:Nuntio load`.",
+  },
+  {
+    name = "$vuIteration",
+    insert_text = "$vuIteration",
+    detail = "Iteration count of the virtual user",
+    doc = "**{{$vuIteration}}**\n\nHow many requests this virtual user has sent so far (1..) during `:Nuntio load`.",
+  },
 }
 
 --- Directives & Metadata
@@ -285,6 +303,18 @@ M.directives = {
     insert_text = "@assert ",
     detail = "Assert on the response",
     doc = "# @assert <subject> [arg] <operator> [value]\n\nChecks the response after it arrives. Results appear inline, in the **Tests** tab, and in the `run_all` summary.\n\n*Subjects*: `status`, `header <Name>`, `body [jsonpath]`, `duration` (ms)\n\n*Operators*: `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `!contains`, `matches` (Lua pattern), `exists`, `!exists`\n\n*Examples*:\n```http\n# @assert status == 201\n# @assert header Content-Type contains json\n# @assert body $.id exists\n# @assert body $.name == \"Amorim\"\n# @assert duration < 500\n```",
+  },
+  {
+    name = "@load",
+    insert_text = "@load ",
+    detail = "Load test settings",
+    doc = "# @load [requests=N] [concurrency=C] [duration=30s] [timeout=ms]\n\nSettings for `:Nuntio load` on this request. Arguments to `:Nuntio load` override them.\n\nThe request is resolved again for each iteration, so `{{$uuid}}`, `{{$iteration}}`, `{{$vu}}` and `{{data.<column>}}` change every time. `# @assert` lines are checked on every response.\n\nThe curl backend refuses runs above its limits (`opts.load.curl`).",
+  },
+  {
+    name = "@data",
+    insert_text = "@data ",
+    detail = "Feed load test iterations from CSV/JSON",
+    doc = "# @data <file.csv|file.json> [mode=circular|sequential|random|unique]\n\nEach load test iteration takes one row; columns are available as `{{data.<column>}}`.\n\n- `circular` (default): in order, wrapping around\n- `sequential`: in order, the test stops when rows run out\n- `random`: random rows, with repeats\n- `unique`: random order, each row once",
   },
   {
     name = "@jq",
