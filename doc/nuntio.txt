@@ -62,7 +62,7 @@ Configure nuntio in your init.lua or lazy.nvim specification:
 ==============================================================================
 3. COMMANDS & KEYMAPS                                        *nuntio-commands*
 
-COMMANDS                                                    *nuntio-commands*
+COMMANDS                                                *nuntio-commands-list*
 
 :Nuntio run            Execute request at cursor or visual selection
 :Nuntio run_all        Execute all requests in current buffer
