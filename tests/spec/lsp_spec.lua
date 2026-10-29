@@ -410,11 +410,21 @@ describe("In-Process LSP Code Actions & Client Lifecycle", function()
     }
 
     local hover_received = false
-    client:request("textDocument/hover", hover_params, function(err, result)
-      assert_nil(err)
-      assert_not_nil(result)
-      hover_received = true
-    end, buf)
+    local req_ok = pcall(function()
+      client:request("textDocument/hover", hover_params, function(err, result)
+        assert_nil(err)
+        assert_not_nil(result)
+        hover_received = true
+      end, buf)
+    end)
+
+    if not req_ok then
+      client.request("textDocument/hover", hover_params, function(err, result)
+        assert_nil(err)
+        assert_not_nil(result)
+        hover_received = true
+      end, buf)
+    end
 
     vim.wait(300, function() return hover_received end)
     assert_true(hover_received, "hover request should complete asynchronously")
