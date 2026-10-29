@@ -426,7 +426,7 @@ describe("In-Process LSP Code Actions & Client Lifecycle", function()
       end, buf)
     end
 
-    vim.wait(300, function() return hover_received end)
+    vim.wait(1000, function() return hover_received end)
     assert_true(hover_received, "hover request should complete asynchronously")
   end)
 

@@ -116,23 +116,33 @@ function M.create_server()
       req_seq = req_seq + 1
       local req_id = req_seq
 
-      local ok, res = pcall(function()
-        local h = handlers[method]
-        if h then
-          return h(params)
-        end
-        return nil
-      end)
+      local function dispatch()
+        if closing then return end
 
-      if not ok then
-        vim.notify("nuntio-lsp error in " .. method .. ": " .. tostring(res), vim.log.levels.ERROR)
-        handler(tostring(res), nil)
-      else
-        handler(nil, res)
+        local ok, res = pcall(function()
+          local h = handlers[method]
+          if h then
+            return h(params)
+          end
+          return nil
+        end)
+
+        if not ok then
+          vim.notify("nuntio-lsp error in " .. method .. ": " .. tostring(res), vim.log.levels.ERROR)
+          handler(tostring(res), nil)
+        else
+          handler(nil, res)
+        end
+
+        if notify_reply_callback then
+          notify_reply_callback(req_id)
+        end
       end
 
-      if notify_reply_callback then
-        notify_reply_callback(req_id)
+      if method == "initialize" then
+        dispatch()
+      else
+        vim.schedule(dispatch)
       end
 
       return true, req_id
